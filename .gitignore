@@ -325,7 +325,7 @@ chroma_db/
 
 # Generated reports
 reports/
-*.md
+
 
 # Logs
 *.log
