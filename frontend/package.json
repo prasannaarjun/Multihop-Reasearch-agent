@@ -1,0 +1,41 @@
+{
+  "name": "multihop-research-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  },
+  "resolutions": {
+    "webpack": "^5.88.0"
+  },
+  "scripts": {
+    "start": "cross-env NODE_OPTIONS=--no-deprecation react-scripts start",
+    "build": "cross-env NODE_OPTIONS=--no-deprecation react-scripts build",
+    "test": "cross-env NODE_OPTIONS=--no-deprecation react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "proxy": "http://localhost:8000"
+}

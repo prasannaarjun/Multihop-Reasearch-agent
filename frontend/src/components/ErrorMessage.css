@@ -1,0 +1,37 @@
+/* Error message styles */
+.error {
+  background: #f8d7da;
+  color: #721c24;
+  padding: 20px;
+  border-radius: 6px;
+  border: 1px solid #f5c6cb;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.error h3 {
+  margin-bottom: 10px;
+}
+
+.dismiss-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #721c24;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.dismiss-btn:hover {
+  background-color: rgba(114, 28, 36, 0.1);
+}

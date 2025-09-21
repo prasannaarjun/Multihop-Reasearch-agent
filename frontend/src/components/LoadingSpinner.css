@@ -1,0 +1,10 @@
+/* Loading spinner styles */
+.loading {
+  text-align: center;
+  padding: 40px;
+}
+
+.loading p {
+  color: #666;
+  font-size: 1.1em;
+}

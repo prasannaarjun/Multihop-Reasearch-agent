@@ -1,0 +1,54 @@
+/* App container */
+.app {
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  background: white;
+  min-height: 100vh;
+  box-shadow: 0 0 20px rgba(0,0,0,0.1);
+}
+
+/* Main content */
+main {
+  margin-bottom: 40px;
+}
+
+/* Success message */
+.success-message {
+  background: #d4edda;
+  color: #155724;
+  padding: 15px;
+  border-radius: 6px;
+  border: 1px solid #c3e6cb;
+  margin-bottom: 20px;
+}
+
+.success-message h4 {
+  margin-bottom: 8px;
+  color: #155724;
+}
+
+.success-message p {
+  margin: 4px 0;
+  font-size: 0.9em;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #e1e8ed;
+  color: #7f8c8d;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .container {
+    padding: 15px;
+  }
+}

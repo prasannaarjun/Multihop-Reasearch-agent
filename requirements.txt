@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sentence-transformers
+chromadb
+numpy
+pydantic
+python-multipart
+jinja2
+markdown
+requests
+ollama
+PyPDF2
+pypdf
+python-latex
