@@ -1,0 +1,223 @@
+/* Conversation List Styles */
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.empty-conversations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #666;
+  text-align: center;
+  padding: 20px;
+}
+
+.empty-icon {
+  font-size: 3em;
+  margin-bottom: 15px;
+  opacity: 0.5;
+}
+
+.empty-conversations p {
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+.empty-conversations p:last-child {
+  font-size: 0.8em;
+  color: #999;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: white;
+  border: 1px solid transparent;
+}
+
+.conversation-item:hover {
+  background: #f8f9fa;
+  border-color: #e1e8ed;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.conversation-item.active {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+}
+
+.conversation-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-title {
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95em;
+}
+
+.conversation-title-input {
+  width: 100%;
+  border: 2px solid #667eea;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.95em;
+  font-weight: 600;
+  background: white;
+  outline: none;
+}
+
+.conversation-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8em;
+  color: #666;
+}
+
+.message-count {
+  font-weight: 500;
+}
+
+.conversation-date {
+  opacity: 0.7;
+}
+
+.conversation-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  margin-left: 8px;
+}
+
+.conversation-item:hover .conversation-actions {
+  opacity: 1;
+}
+
+.conversation-item.active .conversation-actions {
+  opacity: 1;
+}
+
+.edit-btn, .delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.edit-btn:hover {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.delete-btn:hover {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
+/* Scrollbar styling */
+.conversation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.conversation-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.conversation-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.conversation-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .conversation-list {
+    padding: 8px;
+  }
+  
+  .conversation-item {
+    padding: 10px;
+    margin-bottom: 6px;
+  }
+  
+  .conversation-title {
+    font-size: 0.9em;
+  }
+  
+  .conversation-meta {
+    font-size: 0.75em;
+  }
+  
+  .conversation-actions {
+    opacity: 1; /* Always show on mobile */
+  }
+  
+  .edit-btn, .delete-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 1em;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .conversation-item {
+    background: #2d3748;
+    color: #e2e8f0;
+  }
+  
+  .conversation-item:hover {
+    background: #4a5568;
+  }
+  
+  .conversation-item.active {
+    background: #2b6cb0;
+    color: white;
+  }
+  
+  .conversation-title {
+    color: #e2e8f0;
+  }
+  
+  .conversation-item.active .conversation-title {
+    color: white;
+  }
+  
+  .conversation-meta {
+    color: #a0aec0;
+  }
+  
+  .conversation-item.active .conversation-meta {
+    color: rgba(255,255,255,0.8);
+  }
+}

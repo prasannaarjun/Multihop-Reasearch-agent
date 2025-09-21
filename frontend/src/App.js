@@ -7,6 +7,7 @@ import Results from './components/Results';
 import ErrorMessage from './components/ErrorMessage';
 import FileUpload from './components/FileUpload';
 import CollectionStats from './components/CollectionStats';
+import ChatInterface from './components/ChatInterface';
 import { apiService } from './services/apiService';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const [agentStatus, setAgentStatus] = useState(null);
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [refreshStats, setRefreshStats] = useState(0);
+  const [isResearchMode, setIsResearchMode] = useState(true);
 
   useEffect(() => {
     checkAgentStatus();
@@ -67,10 +69,44 @@ function App() {
     setError(errorMessage);
   };
 
+  const toggleMode = () => {
+    setIsResearchMode(!isResearchMode);
+  };
+
+  if (!isResearchMode) {
+    return (
+      <div className="app">
+        <div className="mode-toggle-header">
+          <button 
+            className="mode-toggle-btn"
+            onClick={toggleMode}
+            title="Switch to Research Mode"
+          >
+            🔍 Research Mode
+          </button>
+        </div>
+        <ChatInterface 
+          onToggleMode={toggleMode}
+          isResearchMode={isResearchMode}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <div className="container">
         <Header />
+        
+        <div className="mode-toggle-header">
+          <button 
+            className="mode-toggle-btn"
+            onClick={toggleMode}
+            title="Switch to Chat Mode"
+          >
+            💬 Chat Mode
+          </button>
+        </div>
         
         <main>
           <CollectionStats refreshTrigger={refreshStats} />

@@ -6,9 +6,11 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 import os
 from agent import ResearchAgent
+from chat_agent import ChatResearchAgent
 from report import generate_markdown_report, save_report
 from embeddings import add_file_to_index, get_collection_stats
 from file_processor import file_processor
+from chat_manager import chat_manager
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -32,6 +34,7 @@ if os.path.exists("frontend/build"):
 
 # Initialize research agent
 research_agent = None
+chat_research_agent = None
 
 # Request/Response models
 class QuestionRequest(BaseModel):
@@ -65,10 +68,54 @@ class CollectionStatsResponse(BaseModel):
     collection_name: str
     error: Optional[str] = None
 
+class ChatMessage(BaseModel):
+    id: str
+    role: str
+    content: str
+    timestamp: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+    per_sub_k: int = 3
+    include_context: bool = True
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    message_id: str
+    answer: str
+    conversation_title: str
+    message_count: int
+    context_used: bool
+    timestamp: str
+    research_result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+class ConversationInfo(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    is_active: bool
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: List[ChatMessage]
+    title: str
+    message_count: int
+
+class CreateConversationRequest(BaseModel):
+    title: str = "New Conversation"
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the research agent on startup."""
-    global research_agent
+    global research_agent, chat_research_agent
     try:
         # Get configuration from environment variables
         use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
@@ -79,10 +126,19 @@ async def startup_event():
             use_ollama=use_ollama,
             ollama_model=ollama_model
         )
-        print("Research agent initialized successfully")
+        
+        # Initialize chat research agent
+        chat_research_agent = ChatResearchAgent(
+            persist_directory="chroma_db",
+            use_ollama=use_ollama,
+            ollama_model=ollama_model
+        )
+        
+        print("Research agent and chat agent initialized successfully")
     except Exception as e:
         print(f"Failed to initialize research agent: {e}")
         research_agent = None
+        chat_research_agent = None
 
 @app.get("/")
 async def root():
@@ -319,6 +375,179 @@ async def get_supported_file_types():
         "supported_extensions": list(file_processor.supported_extensions),
         "max_file_size_mb": 50
     }
+
+# Chat endpoints
+@app.post("/chat", response_model=ChatResponse)
+async def chat_with_agent(request: ChatRequest):
+    """
+    Chat with the research agent in a conversational context.
+    
+    Args:
+        request: Chat request with message and optional conversation_id
+        
+    Returns:
+        Chat response with answer and conversation info
+    """
+    if chat_research_agent is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Chat research agent not initialized"
+        )
+    
+    try:
+        result = chat_research_agent.chat_ask(
+            question=request.message,
+            conversation_id=request.conversation_id,
+            per_sub_k=request.per_sub_k,
+            include_context=request.include_context
+        )
+        
+        return ChatResponse(
+            conversation_id=result["conversation_id"],
+            message_id=result["message_id"],
+            answer=result["answer"],
+            conversation_title=result["conversation_title"],
+            message_count=result["message_count"],
+            context_used=result["context_used"],
+            timestamp=result["timestamp"],
+            research_result=result.get("research_result"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing chat message: {str(e)}"
+        )
+
+@app.get("/conversations", response_model=List[ConversationInfo])
+async def list_conversations():
+    """
+    List all conversations.
+    
+    Returns:
+        List of conversation information
+    """
+    try:
+        conversations = chat_manager.list_conversations()
+        return [ConversationInfo(**conv) for conv in conversations]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing conversations: {str(e)}"
+        )
+
+@app.get("/conversations/{conversation_id}", response_model=ConversationHistoryResponse)
+async def get_conversation_history(conversation_id: str, max_messages: int = 50):
+    """
+    Get conversation history.
+    
+    Args:
+        conversation_id: ID of the conversation
+        max_messages: Maximum number of messages to return
+        
+    Returns:
+        Conversation history with messages
+    """
+    try:
+        conversation = chat_manager.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found"
+            )
+        
+        messages = chat_manager.get_conversation_history(conversation_id, max_messages)
+        
+        return ConversationHistoryResponse(
+            conversation_id=conversation_id,
+            messages=[ChatMessage(**msg.to_dict()) for msg in messages],
+            title=conversation.title,
+            message_count=len(conversation.messages)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting conversation history: {str(e)}"
+        )
+
+@app.post("/conversations", response_model=Dict[str, str])
+async def create_conversation(request: CreateConversationRequest):
+    """
+    Create a new conversation.
+    
+    Args:
+        request: Request body with title
+        
+    Returns:
+        Conversation ID
+    """
+    try:
+        conversation_id = chat_manager.create_conversation(request.title)
+        return {"conversation_id": conversation_id, "title": request.title}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating conversation: {str(e)}"
+        )
+
+@app.put("/conversations/{conversation_id}/title")
+async def update_conversation_title(conversation_id: str, request: UpdateTitleRequest):
+    """
+    Update conversation title.
+    
+    Args:
+        conversation_id: ID of the conversation
+        request: Request body with new title
+        
+    Returns:
+        Success message
+    """
+    try:
+        success = chat_manager.update_conversation_title(conversation_id, request.title)
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found"
+            )
+        return {"message": "Title updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating conversation title: {str(e)}"
+        )
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """
+    Delete a conversation.
+    
+    Args:
+        conversation_id: ID of the conversation
+        
+    Returns:
+        Success message
+    """
+    try:
+        success = chat_manager.delete_conversation(conversation_id)
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found"
+            )
+        return {"message": "Conversation deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting conversation: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn

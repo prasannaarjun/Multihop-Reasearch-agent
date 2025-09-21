@@ -91,6 +91,47 @@ class ApiService {
   async getSupportedFileTypes() {
     return this.request('/supported-file-types');
   }
+
+  // Chat API methods
+  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true) {
+    return this.request('/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        per_sub_k: perSubK,
+        include_context: includeContext
+      }),
+    });
+  }
+
+  async getConversations() {
+    return this.request('/conversations');
+  }
+
+  async getConversationHistory(conversationId, maxMessages = 50) {
+    return this.request(`/conversations/${conversationId}?max_messages=${maxMessages}`);
+  }
+
+  async createConversation(title = 'New Conversation') {
+    return this.request('/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  async updateConversationTitle(conversationId, title) {
+    return this.request(`/conversations/${conversationId}/title`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  async deleteConversation(conversationId) {
+    return this.request(`/conversations/${conversationId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiService = new ApiService();

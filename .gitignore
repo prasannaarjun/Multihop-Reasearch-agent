@@ -394,3 +394,5 @@ docker-compose.override.yml
 # Local development
 .local/
 local_settings.py
+
+chat_data/

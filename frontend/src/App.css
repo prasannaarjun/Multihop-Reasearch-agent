@@ -37,6 +37,33 @@ main {
   font-size: 0.9em;
 }
 
+/* Mode toggle */
+.mode-toggle-header {
+  text-align: center;
+  padding: 15px 0;
+  border-bottom: 1px solid #e1e8ed;
+  background: #f8f9fa;
+}
+
+.mode-toggle-btn {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.mode-toggle-btn:hover {
+  background: #5a6fd8;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
 /* Footer */
 footer {
   text-align: center;
