@@ -1,9 +1,15 @@
+"""
+Multi-hop Research Agent API - Modular Version
+Updated to use the new modular agent architecture.
+"""
+
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
+from contextlib import asynccontextmanager
 import os
 import warnings
 import logging
@@ -11,27 +17,92 @@ import logging
 # Suppress bcrypt version warning
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
 logging.getLogger("passlib").setLevel(logging.ERROR)
-from agent import ResearchAgent
-from chat_agent import ChatResearchAgent
+
+# Import modular components
+from agents.research import ResearchAgent, DocumentRetriever
+from agents.chat import ChatAgent, ConversationManager
+from agents.shared.models import ResearchResult, ChatResponse, ChatMessage, ConversationInfo
+from agents.shared.exceptions import AgentError, RetrievalError, ConversationError
+
+# Import existing utilities
 from report import generate_markdown_report, save_report
-from embeddings import add_file_to_index, get_collection_stats
+from embeddings import add_file_to_index, get_collection_stats, load_index
 from file_processor import file_processor
-from chat_manager import chat_manager
+from ollama_client import OllamaClient
+
 # Authentication imports
 from auth import auth_router, get_current_active_user, get_optional_current_user, TokenData
 from auth.database import create_tables
+
+# Global variables for agents
+research_agent = None
+chat_agent = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events."""
+    global research_agent, chat_agent
+    
+    # Startup
+    try:
+        # Create database tables
+        create_tables()
+        print("Database tables created successfully")
+        
+        # Get configuration from environment variables
+        use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
+        ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
+        
+        # Load Chroma index
+        collection, model = load_index("chroma_db")
+        
+        # Initialize document retriever
+        retriever = DocumentRetriever(collection, model)
+        
+        # Initialize LLM client if enabled
+        llm_client = None
+        if use_ollama:
+            llm_client = OllamaClient(model_name=ollama_model)
+            if not llm_client.is_available():
+                print("Warning: Ollama not available, falling back to rule-based processing")
+                llm_client = None
+        
+        # Initialize research agent
+        research_agent = ResearchAgent(retriever, llm_client, use_ollama, ollama_model)
+        
+        # Initialize chat agent
+        conversation_manager = ConversationManager()
+        chat_agent = ChatAgent(research_agent, conversation_manager)
+        
+        print("Research agent and chat agent initialized successfully")
+        print("Starting Multi-hop Research Agent API (Modular Version)...")
+    except Exception as e:
+        print(f"Failed to initialize agents: {e}")
+        research_agent = None
+        chat_agent = None
+    
+    yield
+    
+    # Shutdown
+    print("Shutting down Multi-hop Research Agent API...")
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Multi-hop Research Agent",
     description="A research agent that uses Chroma for document retrieval and multi-hop reasoning",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React dev server
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",  # React dev server
+        "https://*.ngrok-free.app",  # ngrok domains
+        "https://*.ngrok.io",  # Legacy ngrok domains
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,10 +114,6 @@ app.include_router(auth_router)
 # Mount static files for React app
 if os.path.exists("frontend/build"):
     app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
-
-# Initialize research agent
-research_agent = None
-chat_research_agent = None
 
 # Request/Response models
 class QuestionRequest(BaseModel):
@@ -80,7 +147,7 @@ class CollectionStatsResponse(BaseModel):
     collection_name: str
     error: Optional[str] = None
 
-class ChatMessage(BaseModel):
+class ChatMessageResponse(BaseModel):
     id: str
     role: str
     content: str
@@ -93,7 +160,7 @@ class ChatRequest(BaseModel):
     per_sub_k: int = 3
     include_context: bool = True
 
-class ChatResponse(BaseModel):
+class ChatResponseModel(BaseModel):
     conversation_id: str
     message_id: str
     answer: str
@@ -104,17 +171,9 @@ class ChatResponse(BaseModel):
     research_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
-class ConversationInfo(BaseModel):
-    id: str
-    title: str
-    created_at: str
-    updated_at: str
-    message_count: int
-    is_active: bool
-
 class ConversationHistoryResponse(BaseModel):
     conversation_id: str
-    messages: List[ChatMessage]
+    messages: List[ChatMessageResponse]
     title: str
     message_count: int
 
@@ -124,37 +183,6 @@ class CreateConversationRequest(BaseModel):
 class UpdateTitleRequest(BaseModel):
     title: str
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the research agent and database on startup."""
-    global research_agent, chat_research_agent
-    try:
-        # Create database tables
-        create_tables()
-        print("Database tables created successfully")
-        
-        # Get configuration from environment variables
-        use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
-        ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
-        
-        research_agent = ResearchAgent(
-            persist_directory="chroma_db",
-            use_ollama=use_ollama,
-            ollama_model=ollama_model
-        )
-        
-        # Initialize chat research agent
-        chat_research_agent = ChatResearchAgent(
-            persist_directory="chroma_db",
-            use_ollama=use_ollama,
-            ollama_model=ollama_model
-        )
-        
-        print("Research agent and chat agent initialized successfully")
-    except Exception as e:
-        print(f"Failed to initialize research agent: {e}")
-        research_agent = None
-        chat_research_agent = None
 
 @app.get("/")
 async def root():
@@ -211,6 +239,11 @@ async def ask_question(
             total_documents=result['total_documents']
         )
         
+    except AgentError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent error: {str(e)}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -267,13 +300,13 @@ async def get_stats():
     
     try:
         # Get collection stats
-        collection = research_agent.retriever.collection
-        doc_count = collection.count()
+        stats = research_agent.get_collection_stats()
         
         return {
-            "documents_in_database": doc_count,
+            "documents_in_database": stats.get("total_documents", 0),
             "agent_status": "active",
-            "database_type": "Chroma"
+            "database_type": "Chroma",
+            **stats
         }
         
     except Exception as e:
@@ -399,7 +432,7 @@ async def get_supported_file_types():
     }
 
 # Chat endpoints
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponseModel)
 async def chat_with_agent(
     request: ChatRequest,
     current_user: TokenData = Depends(get_current_active_user)
@@ -413,32 +446,37 @@ async def chat_with_agent(
     Returns:
         Chat response with answer and conversation info
     """
-    if chat_research_agent is None:
+    if chat_agent is None:
         raise HTTPException(
             status_code=503,
             detail="Chat research agent not initialized"
         )
     
     try:
-        result = chat_research_agent.chat_ask(
-            question=request.message,
+        response = chat_agent.process(
+            message=request.message,
             conversation_id=request.conversation_id,
             per_sub_k=request.per_sub_k,
             include_context=request.include_context
         )
         
-        return ChatResponse(
-            conversation_id=result["conversation_id"],
-            message_id=result["message_id"],
-            answer=result["answer"],
-            conversation_title=result["conversation_title"],
-            message_count=result["message_count"],
-            context_used=result["context_used"],
-            timestamp=result["timestamp"],
-            research_result=result.get("research_result"),
-            error=result.get("error")
+        return ChatResponseModel(
+            conversation_id=response.conversation_id,
+            message_id=response.message_id,
+            answer=response.answer,
+            conversation_title=response.conversation_title,
+            message_count=response.message_count,
+            context_used=response.context_used,
+            timestamp=response.timestamp,
+            research_result=response.research_result.to_dict() if response.research_result else None,
+            error=response.error
         )
         
+    except AgentError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent error: {str(e)}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -456,7 +494,7 @@ async def list_conversations(
         List of conversation information
     """
     try:
-        conversations = chat_manager.list_conversations()
+        conversations = chat_agent.list_conversations()
         return [ConversationInfo(**conv) for conv in conversations]
     except Exception as e:
         raise HTTPException(
@@ -481,18 +519,18 @@ async def get_conversation_history(
         Conversation history with messages
     """
     try:
-        conversation = chat_manager.get_conversation(conversation_id)
+        conversation = chat_agent.conversation_manager.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(
                 status_code=404,
                 detail="Conversation not found"
             )
         
-        messages = chat_manager.get_conversation_history(conversation_id, max_messages)
+        messages = chat_agent.get_conversation_history(conversation_id, max_messages)
         
         return ConversationHistoryResponse(
             conversation_id=conversation_id,
-            messages=[ChatMessage(**msg.to_dict()) for msg in messages],
+            messages=[ChatMessageResponse(**msg) for msg in messages],
             title=conversation.title,
             message_count=len(conversation.messages)
         )
@@ -520,7 +558,7 @@ async def create_conversation(
         Conversation ID
     """
     try:
-        conversation_id = chat_manager.create_conversation(request.title)
+        conversation_id = chat_agent.create_conversation(request.title)
         return {"conversation_id": conversation_id, "title": request.title}
     except Exception as e:
         raise HTTPException(
@@ -545,7 +583,7 @@ async def update_conversation_title(
         Success message
     """
     try:
-        success = chat_manager.update_conversation_title(conversation_id, request.title)
+        success = chat_agent.update_conversation_title(conversation_id, request.title)
         if not success:
             raise HTTPException(
                 status_code=404,
@@ -575,7 +613,7 @@ async def delete_conversation(
         Success message
     """
     try:
-        success = chat_manager.delete_conversation(conversation_id)
+        success = chat_agent.delete_conversation(conversation_id)
         if not success:
             raise HTTPException(
                 status_code=404,
@@ -590,10 +628,33 @@ async def delete_conversation(
             detail=f"Error deleting conversation: {str(e)}"
         )
 
+@app.get("/conversations/{conversation_id}/suggestions")
+async def get_follow_up_suggestions(
+    conversation_id: str,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """
+    Get follow-up question suggestions for a conversation.
+    
+    Args:
+        conversation_id: ID of the conversation
+        
+    Returns:
+        List of suggested follow-up questions
+    """
+    try:
+        suggestions = chat_agent.generate_follow_up_suggestions(conversation_id)
+        return {"suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting suggestions: {str(e)}"
+        )
+
 if __name__ == "__main__":
     import uvicorn
     
-    print("Starting Multi-hop Research Agent API...")
+    print("Starting Multi-hop Research Agent API (Modular Version)...")
     print("Make sure you have built the Chroma index first using embeddings.py")
     
     uvicorn.run(

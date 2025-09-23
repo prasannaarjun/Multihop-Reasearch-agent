@@ -1,106 +1,28 @@
 """
-Chat Manager for Multi-hop Research Agent
+Conversation Manager for Chat Agent
 Handles conversation state, context, and chat-level interactions.
 """
 
 import uuid
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
 import json
 import os
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from ..shared.interfaces import IConversationManager
+from ..shared.models import Conversation, ChatMessage
+from ..shared.exceptions import ConversationError
 
 
-@dataclass
-class Message:
-    """Represents a single message in a conversation."""
-    id: str
-    role: str  # 'user', 'assistant', 'system'
-    content: str
-    timestamp: datetime
-    metadata: Optional[Dict[str, Any]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        data = asdict(self)
-        data['timestamp'] = self.timestamp.isoformat()
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Message':
-        """Create from dictionary."""
-        data['timestamp'] = datetime.fromisoformat(data['timestamp'])
-        return cls(**data)
-
-
-@dataclass
-class Conversation:
-    """Represents a conversation session."""
-    id: str
-    title: str
-    created_at: datetime
-    updated_at: datetime
-    messages: List[Message]
-    context: Dict[str, Any]
-    is_active: bool = True
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        data = asdict(self)
-        data['created_at'] = self.created_at.isoformat()
-        data['updated_at'] = self.updated_at.isoformat()
-        data['messages'] = [msg.to_dict() for msg in self.messages]
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Conversation':
-        """Create from dictionary."""
-        data['created_at'] = datetime.fromisoformat(data['created_at'])
-        data['updated_at'] = datetime.fromisoformat(data['updated_at'])
-        data['messages'] = [Message.from_dict(msg) for msg in data['messages']]
-        return cls(**data)
-    
-    def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Message:
-        """Add a new message to the conversation."""
-        message = Message(
-            id=str(uuid.uuid4()),
-            role=role,
-            content=content,
-            timestamp=datetime.now(),
-            metadata=metadata or {}
-        )
-        self.messages.append(message)
-        self.updated_at = datetime.now()
-        return message
-    
-    def get_recent_context(self, max_messages: int = 10) -> List[Message]:
-        """Get recent messages for context."""
-        return self.messages[-max_messages:] if self.messages else []
-    
-    def get_conversation_summary(self) -> str:
-        """Get a summary of the conversation."""
-        if not self.messages:
-            return "No messages yet."
-        
-        user_messages = [msg for msg in self.messages if msg.role == 'user']
-        if not user_messages:
-            return "No user messages yet."
-        
-        # Create a simple summary from user messages
-        topics = []
-        for msg in user_messages[:3]:  # First 3 user messages
-            if len(msg.content) > 50:
-                topics.append(msg.content[:50] + "...")
-            else:
-                topics.append(msg.content)
-        
-        return f"Topics discussed: {'; '.join(topics)}"
-
-
-class ChatManager:
+class ConversationManager(IConversationManager):
     """Manages chat conversations and state."""
     
     def __init__(self, persist_directory: str = "chat_data"):
+        """
+        Initialize conversation manager.
+        
+        Args:
+            persist_directory: Directory to persist conversation data
+        """
         self.persist_directory = persist_directory
         self.conversations: Dict[str, Conversation] = {}
         self.active_conversation_id: Optional[str] = None
@@ -172,7 +94,7 @@ class ChatManager:
         return False
     
     def add_message(self, conversation_id: str, role: str, content: str, 
-                   metadata: Optional[Dict[str, Any]] = None) -> Optional[Message]:
+                   metadata: Optional[Dict[str, Any]] = None) -> Optional[ChatMessage]:
         """Add a message to a conversation."""
         conversation = self.conversations.get(conversation_id)
         if not conversation:
@@ -182,7 +104,7 @@ class ChatManager:
         self._save_conversations()
         return message
     
-    def get_conversation_history(self, conversation_id: str, max_messages: int = 50) -> List[Message]:
+    def get_conversation_history(self, conversation_id: str, max_messages: int = 50) -> List[ChatMessage]:
         """Get conversation history."""
         conversation = self.conversations.get(conversation_id)
         if not conversation:
@@ -243,34 +165,39 @@ class ChatManager:
         }
         
         return context
-
-
-# Global chat manager instance
-chat_manager = ChatManager()
+    
+    def get_conversation_summary(self, conversation_id: str) -> str:
+        """Get a summary of the conversation."""
+        conversation = self.conversations.get(conversation_id)
+        if not conversation:
+            return "Conversation not found."
+        
+        return conversation.get_conversation_summary()
 
 
 if __name__ == "__main__":
-    # Test the chat manager
-    print("Testing Chat Manager")
+    # Test the conversation manager
+    print("Testing Conversation Manager")
     print("=" * 50)
     
     # Create a test conversation
-    conv_id = chat_manager.create_conversation("Test Conversation")
+    manager = ConversationManager()
+    conv_id = manager.create_conversation("Test Conversation")
     print(f"Created conversation: {conv_id}")
     
     # Add some messages
-    chat_manager.add_message(conv_id, "user", "Hello, I need help with machine learning")
-    chat_manager.add_message(conv_id, "assistant", "I'd be happy to help you with machine learning! What specific topic would you like to explore?")
-    chat_manager.add_message(conv_id, "user", "What are the best algorithms for image classification?")
+    manager.add_message(conv_id, "user", "Hello, I need help with machine learning")
+    manager.add_message(conv_id, "assistant", "I'd be happy to help you with machine learning! What specific topic would you like to explore?")
+    manager.add_message(conv_id, "user", "What are the best algorithms for image classification?")
     
     # Get conversation history
-    history = chat_manager.get_conversation_history(conv_id)
+    history = manager.get_conversation_history(conv_id)
     print(f"\nConversation history ({len(history)} messages):")
     for msg in history:
         print(f"  {msg.role}: {msg.content[:50]}...")
     
     # List conversations
-    conversations = chat_manager.list_conversations()
+    conversations = manager.list_conversations()
     print(f"\nAll conversations ({len(conversations)}):")
     for conv in conversations:
         print(f"  {conv['title']} - {conv['message_count']} messages")

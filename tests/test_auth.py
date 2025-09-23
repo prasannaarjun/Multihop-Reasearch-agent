@@ -1,5 +1,5 @@
 """
-Tests for authentication module
+Tests for authentication system.
 """
 
 import pytest
@@ -38,7 +38,8 @@ def setup_database():
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
-    os.remove("test_auth.db")
+    if os.path.exists("test_auth.db"):
+        os.remove("test_auth.db")
 
 @pytest.fixture
 def client(setup_database):
@@ -53,6 +54,7 @@ def auth_service(setup_database):
         yield AuthService(db)
     finally:
         db.close()
+
 
 class TestAuthService:
     """Test authentication service"""
@@ -154,6 +156,7 @@ class TestAuthService:
         # Test invalid token
         invalid_token_data = auth_service.verify_token("invalid_token")
         assert invalid_token_data is None
+
 
 class TestAuthAPI:
     """Test authentication API endpoints"""
@@ -297,6 +300,3 @@ class TestAuthAPI:
         assert data["email"] == "info@example.com"
         assert "id" in data
         assert "created_at" in data
-
-if __name__ == "__main__":
-    pytest.main([__file__])

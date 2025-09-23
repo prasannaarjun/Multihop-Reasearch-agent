@@ -3,6 +3,7 @@ import './ChatInterface.css';
 import ChatMessage from './ChatMessage';
 import ConversationList from './ConversationList';
 import FileUpload from './FileUpload';
+import SubqueryDisplay from './SubqueryDisplay';
 import { apiService } from '../services/apiService';
 
 const ChatInterface = ({ onToggleMode, isResearchMode }) => {
@@ -14,7 +15,10 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   const [error, setError] = useState(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(null);
+  const [loadingSubqueries, setLoadingSubqueries] = useState([]);
+  const [visibleSubqueries, setVisibleSubqueries] = useState(0);
   const messagesEndRef = useRef(null);
+  const subqueryTimeouts = useRef([]);
 
   useEffect(() => {
     loadConversations();
@@ -24,8 +28,90 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     scrollToBottom();
   }, [messages]);
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      subqueryTimeouts.current.forEach(timeout => clearTimeout(timeout));
+    };
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const generateMockSubqueries = (question) => {
+    // Simple mock subquery generation based on common patterns
+    const questionLower = question.toLowerCase().trim();
+    const mockSubqueries = [];
+    
+    // Extract the main topic by removing question words
+    const cleanQuestion = question.replace(/^(what|how|why|when|where|define|explain|describe|tell me about)\s+/i, '').replace(/\?$/, '').trim();
+    
+    // Generate contextual subqueries based on question type
+    if (questionLower.startsWith('what')) {
+      mockSubqueries.push(`What is ${cleanQuestion}?`);
+      mockSubqueries.push(`How does ${cleanQuestion} work?`);
+      mockSubqueries.push(`What are the key features of ${cleanQuestion}?`);
+    } else if (questionLower.startsWith('how')) {
+      mockSubqueries.push(`How does ${cleanQuestion} work?`);
+      mockSubqueries.push(`What are the steps involved in ${cleanQuestion}?`);
+      mockSubqueries.push(`What are the requirements for ${cleanQuestion}?`);
+    } else if (questionLower.startsWith('why')) {
+      mockSubqueries.push(`Why is ${cleanQuestion} important?`);
+      mockSubqueries.push(`What are the benefits of ${cleanQuestion}?`);
+      mockSubqueries.push(`What problems does ${cleanQuestion} solve?`);
+    } else if (questionLower.startsWith('when')) {
+      mockSubqueries.push(`When should ${cleanQuestion} be used?`);
+      mockSubqueries.push(`What is the history of ${cleanQuestion}?`);
+      mockSubqueries.push(`What are the current trends in ${cleanQuestion}?`);
+    } else if (questionLower.startsWith('where')) {
+      mockSubqueries.push(`Where is ${cleanQuestion} used?`);
+      mockSubqueries.push(`What are the applications of ${cleanQuestion}?`);
+      mockSubqueries.push(`What industries use ${cleanQuestion}?`);
+    } else {
+      // Generic subqueries for any other question type
+      mockSubqueries.push(`What is ${cleanQuestion}?`);
+      mockSubqueries.push(`How does ${cleanQuestion} work?`);
+      mockSubqueries.push(`What are the benefits of ${cleanQuestion}?`);
+      mockSubqueries.push(`What are examples of ${cleanQuestion}?`);
+    }
+    
+    // Add additional contextual subqueries if we have space
+    if (mockSubqueries.length < 4) {
+      if (!questionLower.includes('benefit') && !questionLower.includes('advantage')) {
+        mockSubqueries.push(`What are the benefits of ${cleanQuestion}?`);
+      }
+      if (!questionLower.includes('example') && !questionLower.includes('case')) {
+        mockSubqueries.push(`What are examples of ${cleanQuestion}?`);
+      }
+    }
+    
+    return mockSubqueries.slice(0, 4); // Limit to 4 subqueries
+  };
+
+  const simulateProgressiveSubqueries = (subqueries) => {
+    // Clear any existing timeouts
+    subqueryTimeouts.current.forEach(timeout => clearTimeout(timeout));
+    subqueryTimeouts.current = [];
+    
+    setVisibleSubqueries(0);
+    let currentIndex = 0;
+    
+    const processNext = () => {
+      if (currentIndex < subqueries.length) {
+        setVisibleSubqueries(currentIndex + 1);
+        currentIndex++;
+        
+        // Random delay between 1-3 seconds for each subquery
+        const delay = Math.random() * 2000 + 1000;
+        const timeout = setTimeout(processNext, delay);
+        subqueryTimeouts.current.push(timeout);
+      }
+    };
+    
+    // Start processing after a short delay
+    const initialTimeout = setTimeout(processNext, 800);
+    subqueryTimeouts.current.push(initialTimeout);
   };
 
   const loadConversations = async () => {
@@ -77,6 +163,11 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     setInputMessage('');
     setIsLoading(true);
     setError(null);
+    
+    // Generate and show mock subqueries during loading
+    const mockSubqueries = generateMockSubqueries(inputMessage);
+    setLoadingSubqueries(mockSubqueries);
+    simulateProgressiveSubqueries(mockSubqueries);
 
     try {
       const response = await apiService.sendChatMessage(
@@ -112,7 +203,13 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     } catch (err) {
       setError(err.message || 'Failed to send message');
     } finally {
+      // Clear all subquery timeouts
+      subqueryTimeouts.current.forEach(timeout => clearTimeout(timeout));
+      subqueryTimeouts.current = [];
+      
       setIsLoading(false);
+      setLoadingSubqueries([]);
+      setVisibleSubqueries(0);
     }
   };
 
@@ -218,11 +315,11 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
           {isLoading && (
             <div className="message assistant">
               <div className="message-content">
-                <div className="typing-indicator">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
+                <SubqueryDisplay 
+                  subqueries={loadingSubqueries} 
+                  visibleCount={visibleSubqueries}
+                  isProcessing={true} 
+                />
               </div>
             </div>
           )}

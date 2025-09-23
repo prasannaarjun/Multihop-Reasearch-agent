@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import './FileUpload.css';
+import { apiService } from '../services/apiService';
 
 const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -15,8 +16,7 @@ const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
 
   const fetchSupportedTypes = async () => {
     try {
-      const response = await fetch('/supported-file-types');
-      const data = await response.json();
+      const data = await apiService.getSupportedFileTypes();
       setSupportedTypes(data.supported_extensions || []);
     } catch (error) {
       console.error('Failed to fetch supported file types:', error);
@@ -83,20 +83,7 @@ const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
     setUploadProgress(0);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Upload failed');
-      }
-
-      const result = await response.json();
+      const result = await apiService.uploadFile(file);
       setUploadProgress(100);
       
       // Simulate progress for better UX

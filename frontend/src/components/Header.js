@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import UserProfile from './UserProfile';
 import './Header.css';
 
-const Header = () => {
+const Header = ({ onToggleMode, isResearchMode }) => {
   const { user, logout, isAuthenticated } = useAuth();
   const [showUserProfile, setShowUserProfile] = useState(false);
 
@@ -30,6 +30,15 @@ const Header = () => {
               )}
             </div>
             <div className="user-actions">
+              {onToggleMode && (
+                <button
+                  className="mode-toggle-btn"
+                  onClick={onToggleMode}
+                  title={isResearchMode ? "Switch to Chat Mode" : "Switch to Research Mode"}
+                >
+                  {isResearchMode ? "💬 Chat" : "🔍 Research"}
+                </button>
+              )}
               <button
                 className="profile-btn"
                 onClick={() => setShowUserProfile(true)}

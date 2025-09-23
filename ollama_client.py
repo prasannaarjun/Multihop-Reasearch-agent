@@ -108,8 +108,9 @@ class OllamaClient:
         
         # Fallback to original method if LLM fails
         if not subqueries:
-            from planner import generate_subqueries as fallback_generate
-            subqueries = fallback_generate(question)
+            from agents.research.query_planner import QueryPlanner
+            planner = QueryPlanner()
+            subqueries = planner.generate_subqueries(question)
         
         return subqueries[:5]  # Limit to 5 subqueries
     

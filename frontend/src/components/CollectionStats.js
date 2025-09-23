@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './CollectionStats.css';
+import { apiService } from '../services/apiService';
 
 const CollectionStats = ({ refreshTrigger }) => {
   const [stats, setStats] = useState(null);
@@ -15,12 +16,7 @@ const CollectionStats = ({ refreshTrigger }) => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch('/collection-stats');
-      if (!response.ok) {
-        throw new Error('Failed to fetch collection stats');
-      }
-      
-      const data = await response.json();
+      const data = await apiService.getCollectionStats();
       setStats(data);
     } catch (err) {
       setError(err.message);

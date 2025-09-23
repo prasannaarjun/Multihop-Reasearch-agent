@@ -12,7 +12,7 @@ const ConversationList = ({
   const [editTitle, setEditTitle] = useState('');
 
   const handleEditStart = (conversation) => {
-    setEditingId(conversation.id);
+    setEditingId(conversation.conversation_id);
     setEditTitle(conversation.title);
   };
 
@@ -71,20 +71,20 @@ const ConversationList = ({
     <div className="conversation-list">
       {conversations.map((conversation) => (
         <div
-          key={conversation.id}
+          key={conversation.conversation_id}
           className={`conversation-item ${
-            currentConversation?.conversation_id === conversation.id ? 'active' : ''
+            currentConversation?.conversation_id === conversation.conversation_id ? 'active' : ''
           }`}
-          onClick={() => onSelectConversation(conversation.id)}
+          onClick={() => onSelectConversation(conversation.conversation_id)}
         >
           <div className="conversation-content">
-            {editingId === conversation.id ? (
+            {editingId === conversation.conversation_id ? (
               <input
                 type="text"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
-                onKeyPress={(e) => handleKeyPress(e, conversation.id)}
-                onBlur={() => handleEditSave(conversation.id)}
+                onKeyPress={(e) => handleKeyPress(e, conversation.conversation_id)}
+                onBlur={() => handleEditSave(conversation.conversation_id)}
                 className="conversation-title-input"
                 autoFocus
               />
@@ -120,7 +120,7 @@ const ConversationList = ({
               onClick={(e) => {
                 e.stopPropagation();
                 if (window.confirm('Delete this conversation?')) {
-                  onDeleteConversation(conversation.id);
+                  onDeleteConversation(conversation.conversation_id);
                 }
               }}
               title="Delete conversation"

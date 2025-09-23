@@ -66,6 +66,7 @@ header {
   gap: 8px;
 }
 
+.mode-toggle-btn,
 .profile-btn,
 .logout-btn {
   background: #f8f9fa;
@@ -78,6 +79,13 @@ header {
   font-weight: 500;
   transition: all 0.3s ease;
   white-space: nowrap;
+}
+
+.mode-toggle-btn:hover {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  color: #1976d2;
+  transform: translateY(-1px);
 }
 
 .profile-btn:hover {
@@ -94,6 +102,7 @@ header {
   transform: translateY(-1px);
 }
 
+.mode-toggle-btn:active,
 .profile-btn:active,
 .logout-btn:active {
   transform: translateY(0);
@@ -138,6 +147,7 @@ header {
     font-size: 0.9em;
   }
   
+  .mode-toggle-btn,
   .profile-btn,
   .logout-btn {
     padding: 5px 10px;
@@ -146,6 +156,7 @@ header {
 }
 
 /* Focus styles for accessibility */
+.mode-toggle-btn:focus,
 .profile-btn:focus,
 .logout-btn:focus {
   outline: 2px solid #667eea;

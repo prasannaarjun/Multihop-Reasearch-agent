@@ -128,7 +128,7 @@ function AppContent() {
   return (
     <div className="app">
       <div className="container">
-        <Header />
+        <Header onToggleMode={toggleMode} isResearchMode={isResearchMode} />
         
         <main>
           <CollectionStats refreshTrigger={refreshStats} />

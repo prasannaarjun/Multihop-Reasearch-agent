@@ -1,5 +1,23 @@
 // API service for communicating with the FastAPI backend
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// For ngrok, we need to use the same domain as the frontend but with port 8000
+const getApiBase = () => {
+  if (process.env.REACT_APP_API_URL) {
+    console.log('Using REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // If we're running on ngrok, use the same domain with port 8000
+  if (window.location.hostname.includes('ngrok')) {
+    const ngrokUrl = `https://${window.location.hostname.replace(/:\d+$/, '')}:8000`;
+    console.log('Detected ngrok, using API URL:', ngrokUrl);
+    return ngrokUrl;
+  }
+  
+  // Default to localhost for development
+  const localhostUrl = 'http://localhost:8000';
+  console.log('Using localhost API URL:', localhostUrl);
+  return localhostUrl;
+};
 
 class ApiService {
   constructor() {
@@ -22,7 +40,9 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${API_BASE}${endpoint}`;
+    const apiBase = getApiBase();
+    const url = `${apiBase}${endpoint}`;
+    console.log('Making API request to:', url);
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -80,17 +100,27 @@ class ApiService {
   }
 
   async askQuestion(question, perSubK = 3) {
-    return this.request('/ask', {
+    const response = await this.request('/ask', {
       method: 'POST',
       body: JSON.stringify({
         question,
         per_sub_k: perSubK,
       }),
     });
+    
+    // Convert to legacy format for backward compatibility
+    return {
+      question: response.question,
+      answer: response.answer,
+      subqueries: response.subqueries,
+      citations: response.citations,
+      total_documents: response.total_documents
+    };
   }
 
   async exportReport(question) {
-    const response = await fetch(`${API_BASE}/export?question=${encodeURIComponent(question)}`);
+    const apiBase = getApiBase();
+    const response = await fetch(`${apiBase}/export?question=${encodeURIComponent(question)}`);
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -114,10 +144,11 @@ class ApiService {
   }
 
   async uploadFile(file) {
+    const apiBase = getApiBase();
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE}/upload`, {
+    const response = await fetch(`${apiBase}/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -140,7 +171,7 @@ class ApiService {
 
   // Chat API methods
   async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true) {
-    return this.request('/chat', {
+    const response = await this.request('/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
@@ -149,21 +180,61 @@ class ApiService {
         include_context: includeContext
       }),
     });
+    
+    // Convert to legacy format for backward compatibility
+    return {
+      conversation_id: response.conversation_id,
+      message_id: response.message_id,
+      answer: response.answer,
+      conversation_title: response.conversation_title,
+      message_count: response.message_count,
+      context_used: response.context_used,
+      timestamp: response.timestamp,
+      research_result: response.research_result,
+      error: response.error
+    };
   }
 
   async getConversations() {
-    return this.request('/conversations');
+    const conversations = await this.request('/conversations');
+    // Convert to legacy format for backward compatibility
+    return conversations.map(conv => ({
+      conversation_id: conv.id,
+      title: conv.title,
+      created_at: conv.created_at,
+      updated_at: conv.updated_at,
+      message_count: conv.message_count,
+      is_active: conv.is_active
+    }));
   }
 
   async getConversationHistory(conversationId, maxMessages = 50) {
-    return this.request(`/conversations/${conversationId}?max_messages=${maxMessages}`);
+    const response = await this.request(`/conversations/${conversationId}?max_messages=${maxMessages}`);
+    // Convert to legacy format for backward compatibility
+    return {
+      conversation_id: response.conversation_id,
+      title: response.title,
+      message_count: response.message_count,
+      messages: response.messages.map(msg => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        metadata: msg.metadata || {}
+      }))
+    };
   }
 
   async createConversation(title = 'New Conversation') {
-    return this.request('/conversations', {
+    const response = await this.request('/conversations', {
       method: 'POST',
       body: JSON.stringify({ title }),
     });
+    // Convert to legacy format for backward compatibility
+    return {
+      conversation_id: response.conversation_id,
+      title: response.title
+    };
   }
 
   async updateConversationTitle(conversationId, title) {
@@ -203,7 +274,8 @@ class ApiService {
       throw new Error('No refresh token available');
     }
 
-    const response = await fetch(`${API_BASE}/auth/refresh`, {
+    const apiBase = getApiBase();
+    const response = await fetch(`${apiBase}/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -223,7 +295,8 @@ class ApiService {
   async logout() {
     if (this.refreshToken) {
       try {
-        await fetch(`${API_BASE}/auth/logout`, {
+        const apiBase = getApiBase();
+        await fetch(`${apiBase}/auth/logout`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
