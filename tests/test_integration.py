@@ -308,3 +308,4 @@ class TestModularIntegration:
         # Test memory usage (basic check)
         assert isinstance(result.answer, str)
         assert len(result.answer) > 0
+

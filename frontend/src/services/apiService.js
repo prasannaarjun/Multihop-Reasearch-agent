@@ -1,16 +1,37 @@
 // API service for communicating with the FastAPI backend
-// For ngrok, we need to use the same domain as the frontend but with port 8000
+// For ngrok, we need to use the backend ngrok URL
 const getApiBase = () => {
   if (process.env.REACT_APP_API_URL) {
     console.log('Using REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
     return process.env.REACT_APP_API_URL;
   }
   
-  // If we're running on ngrok, use the same domain with port 8000
-  if (window.location.hostname.includes('ngrok')) {
-    const ngrokUrl = `https://${window.location.hostname.replace(/:\d+$/, '')}:8000`;
-    console.log('Detected ngrok, using API URL:', ngrokUrl);
-    return ngrokUrl;
+  // If we're running on ngrok, we need to get the backend URL dynamically
+  if (window.location.hostname.includes('ngrok') || window.location.hostname.includes('ngrok-free.app')) {
+    // For free ngrok plan, we need to get the backend URL from ngrok API
+    // This is a temporary solution - you should set REACT_APP_API_URL instead
+    console.warn('⚠️  Using ngrok free plan - URLs change on restart!');
+    console.warn('⚠️  Please set REACT_APP_API_URL environment variable with your backend ngrok URL');
+    console.warn('⚠️  Current backend URL: Check your ngrok dashboard at http://localhost:4040');
+    
+    // Try to get the backend URL from localStorage (set manually)
+    const storedBackendUrl = localStorage.getItem('ngrok_backend_url');
+    if (storedBackendUrl) {
+      console.log('Using stored backend URL:', storedBackendUrl);
+      return storedBackendUrl;
+    }
+    
+    // Fallback: prompt user to set the URL
+    const backendUrl = prompt('Please enter your backend ngrok URL (e.g., https://abc123.ngrok-free.app):');
+    if (backendUrl) {
+      localStorage.setItem('ngrok_backend_url', backendUrl);
+      console.log('Stored backend URL:', backendUrl);
+      return backendUrl;
+    }
+    
+    // If no URL provided, use localhost (won't work with ngrok)
+    console.error('No backend URL provided, falling back to localhost (will not work with ngrok)');
+    return 'http://localhost:8000';
   }
   
   // Default to localhost for development

@@ -455,3 +455,4 @@ class TestChatAgent:
         
         assert result == True
         conversation_manager.update_conversation_title.assert_called_once_with(conv_id, "New Title")
+

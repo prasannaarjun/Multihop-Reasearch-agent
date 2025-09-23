@@ -402,3 +402,4 @@ class TestResearchAgent:
         
         with pytest.raises(AgentError):
             agent.process("Test question")
+

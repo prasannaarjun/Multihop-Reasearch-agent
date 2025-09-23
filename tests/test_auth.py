@@ -300,3 +300,4 @@ class TestAuthAPI:
         assert data["email"] == "info@example.com"
         assert "id" in data
         assert "created_at" in data
+

@@ -94,3 +94,4 @@ class TestILLMClient:
         
         is_available_sig = inspect.signature(client.is_available)
         assert len(is_available_sig.parameters) == 0  # No parameters except self
+

@@ -99,3 +99,4 @@ def sample_research_result():
         total_documents=1,
         processing_time=1.5
     )
+

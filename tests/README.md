@@ -200,3 +200,4 @@ When adding new features:
 2. Ensure all tests pass
 3. Update this README if needed
 4. Follow the existing test patterns and conventions
+
