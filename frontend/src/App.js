@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Header from './components/Header';
 import QuestionForm from './components/QuestionForm';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -8,9 +9,12 @@ import ErrorMessage from './components/ErrorMessage';
 import FileUpload from './components/FileUpload';
 import CollectionStats from './components/CollectionStats';
 import ChatInterface from './components/ChatInterface';
+import Login from './components/Login';
+import Register from './components/Register';
 import { apiService } from './services/apiService';
 
-function App() {
+// Main App Content Component
+function AppContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
@@ -18,6 +22,8 @@ function App() {
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [refreshStats, setRefreshStats] = useState(0);
   const [isResearchMode, setIsResearchMode] = useState(true);
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   useEffect(() => {
     checkAgentStatus();
@@ -73,18 +79,43 @@ function App() {
     setIsResearchMode(!isResearchMode);
   };
 
+  // Show loading while checking authentication
+  if (authLoading) {
+    return (
+      <div className="app">
+        <div className="container">
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            minHeight: '50vh' 
+          }}>
+            <LoadingSpinner />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show authentication forms if not logged in
+  if (!isAuthenticated) {
+    return (
+      <div className="app">
+        <div className="auth-container">
+          {authMode === 'login' ? (
+            <Login onSwitchToRegister={() => setAuthMode('register')} />
+          ) : (
+            <Register onSwitchToLogin={() => setAuthMode('login')} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Show chat mode
   if (!isResearchMode) {
     return (
       <div className="app">
-        <div className="mode-toggle-header">
-          <button 
-            className="mode-toggle-btn"
-            onClick={toggleMode}
-            title="Switch to Research Mode"
-          >
-            🔍 Research Mode
-          </button>
-        </div>
         <ChatInterface 
           onToggleMode={toggleMode}
           isResearchMode={isResearchMode}
@@ -93,20 +124,11 @@ function App() {
     );
   }
 
+  // Show research mode (main app)
   return (
     <div className="app">
       <div className="container">
         <Header />
-        
-        <div className="mode-toggle-header">
-          <button 
-            className="mode-toggle-btn"
-            onClick={toggleMode}
-            title="Switch to Chat Mode"
-          >
-            💬 Chat Mode
-          </button>
-        </div>
         
         <main>
           <CollectionStats refreshTrigger={refreshStats} />
@@ -149,6 +171,15 @@ function App() {
         </footer>
       </div>
     </div>
+  );
+}
+
+// Main App Component with AuthProvider
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

@@ -1,25 +1,153 @@
 /* Header styles */
 header {
-  text-align: center;
   margin-bottom: 40px;
   padding-bottom: 20px;
   border-bottom: 2px solid #f0f0f0;
 }
 
-header h1 {
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.header-main {
+  flex: 1;
+  text-align: center;
+}
+
+.header-main h1 {
   color: #2c3e50;
   font-size: 2.5em;
   margin-bottom: 10px;
 }
 
-header p {
+.header-main p {
   color: #7f8c8d;
   font-size: 1.1em;
+  margin: 0;
+}
+
+.header-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 200px;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.user-name {
+  color: #2c3e50;
+  font-weight: 600;
+  font-size: 0.95em;
+}
+
+.admin-badge {
+  background: #667eea;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.user-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-btn,
+.logout-btn {
+  background: #f8f9fa;
+  border: 1px solid #e1e8ed;
+  color: #2c3e50;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85em;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.profile-btn:hover {
+  background: #e9ecef;
+  border-color: #667eea;
+  color: #667eea;
+  transform: translateY(-1px);
+}
+
+.logout-btn:hover {
+  background: #f8d7da;
+  border-color: #dc3545;
+  color: #dc3545;
+  transform: translateY(-1px);
+}
+
+.profile-btn:active,
+.logout-btn:active {
+  transform: translateY(0);
 }
 
 /* Responsive design */
 @media (max-width: 768px) {
-  header h1 {
+  .header-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  
+  .header-main h1 {
     font-size: 2em;
   }
+  
+  .header-user {
+    align-items: center;
+    min-width: auto;
+  }
+  
+  .user-info {
+    align-items: center;
+  }
+  
+  .user-actions {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-main h1 {
+    font-size: 1.8em;
+  }
+  
+  .header-main p {
+    font-size: 1em;
+  }
+  
+  .user-name {
+    font-size: 0.9em;
+  }
+  
+  .profile-btn,
+  .logout-btn {
+    padding: 5px 10px;
+    font-size: 0.8em;
+  }
+}
+
+/* Focus styles for accessibility */
+.profile-btn:focus,
+.logout-btn:focus {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
 }

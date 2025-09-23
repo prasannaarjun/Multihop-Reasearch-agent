@@ -151,7 +151,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   return (
     <div className="chat-interface">
       <div className="chat-sidebar">
-        <div className="chat-header">
+        <div className="chat-sidebar-header">
           <h3>💬 Conversations</h3>
           <button 
             className="new-conversation-btn"
@@ -171,7 +171,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
       </div>
 
       <div className="chat-main">
-        <div className="chat-header">
+        <div className="chat-main-header">
           <div className="chat-title">
             {currentConversation ? currentConversation.title : 'Select a conversation'}
           </div>

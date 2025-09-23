@@ -326,6 +326,8 @@ chroma_db/
 # Generated reports
 reports/
 
+# Chat data
+chat_data/
 
 # Logs
 *.log
@@ -395,4 +397,6 @@ docker-compose.override.yml
 .local/
 local_settings.py
 
-chat_data/
+# Alembic
+alembic/versions/
+alembic.ini

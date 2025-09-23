@@ -1,16 +1,25 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 import os
+import warnings
+import logging
+
+# Suppress bcrypt version warning
+warnings.filterwarnings("ignore", message=".*bcrypt.*")
+logging.getLogger("passlib").setLevel(logging.ERROR)
 from agent import ResearchAgent
 from chat_agent import ChatResearchAgent
 from report import generate_markdown_report, save_report
 from embeddings import add_file_to_index, get_collection_stats
 from file_processor import file_processor
 from chat_manager import chat_manager
+# Authentication imports
+from auth import auth_router, get_current_active_user, get_optional_current_user, TokenData
+from auth.database import create_tables
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -27,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include authentication router
+app.include_router(auth_router)
 
 # Mount static files for React app
 if os.path.exists("frontend/build"):
@@ -114,9 +126,13 @@ class UpdateTitleRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the research agent on startup."""
+    """Initialize the research agent and database on startup."""
     global research_agent, chat_research_agent
     try:
+        # Create database tables
+        create_tables()
+        print("Database tables created successfully")
+        
         # Get configuration from environment variables
         use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
         ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
@@ -161,7 +177,10 @@ async def health_check():
     }
 
 @app.post("/ask", response_model=QuestionResponse)
-async def ask_question(request: QuestionRequest):
+async def ask_question(
+    request: QuestionRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Ask a research question and get a multi-hop reasoned answer.
     
@@ -264,7 +283,10 @@ async def get_stats():
         )
 
 @app.post("/upload", response_model=FileUploadResponse)
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Upload a file (PDF, LaTeX, or text) and add it to the research database.
     
@@ -378,7 +400,10 @@ async def get_supported_file_types():
 
 # Chat endpoints
 @app.post("/chat", response_model=ChatResponse)
-async def chat_with_agent(request: ChatRequest):
+async def chat_with_agent(
+    request: ChatRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Chat with the research agent in a conversational context.
     
@@ -421,7 +446,9 @@ async def chat_with_agent(request: ChatRequest):
         )
 
 @app.get("/conversations", response_model=List[ConversationInfo])
-async def list_conversations():
+async def list_conversations(
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     List all conversations.
     
@@ -438,7 +465,11 @@ async def list_conversations():
         )
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationHistoryResponse)
-async def get_conversation_history(conversation_id: str, max_messages: int = 50):
+async def get_conversation_history(
+    conversation_id: str, 
+    max_messages: int = 50,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Get conversation history.
     
@@ -475,7 +506,10 @@ async def get_conversation_history(conversation_id: str, max_messages: int = 50)
         )
 
 @app.post("/conversations", response_model=Dict[str, str])
-async def create_conversation(request: CreateConversationRequest):
+async def create_conversation(
+    request: CreateConversationRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Create a new conversation.
     
@@ -495,7 +529,11 @@ async def create_conversation(request: CreateConversationRequest):
         )
 
 @app.put("/conversations/{conversation_id}/title")
-async def update_conversation_title(conversation_id: str, request: UpdateTitleRequest):
+async def update_conversation_title(
+    conversation_id: str, 
+    request: UpdateTitleRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Update conversation title.
     
@@ -523,7 +561,10 @@ async def update_conversation_title(conversation_id: str, request: UpdateTitleRe
         )
 
 @app.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
+async def delete_conversation(
+    conversation_id: str,
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
     Delete a conversation.
     

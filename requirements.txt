@@ -12,3 +12,10 @@ ollama
 PyPDF2
 pypdf
 python-latex
+# Authentication dependencies
+python-jose[cryptography]
+passlib[bcrypt]
+sqlalchemy
+psycopg2-binary
+alembic
+python-dotenv
