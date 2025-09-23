@@ -6,7 +6,7 @@ Main chat agent that orchestrates chat functionality with research capabilities.
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from ..shared.interfaces import IAgent
-from ..shared.models import ResearchResult, ChatResponse, ChatMessage
+from ..shared.models import ResearchResult, ChatResponse, ChatMessage, Conversation
 from ..shared.exceptions import AgentError, ConversationError
 from .conversation_manager import ConversationManager
 from .context_builder import ContextBuilder
@@ -48,9 +48,9 @@ class ChatAgent(IAgent):
         try:
             # Get or create conversation
             if not conversation_id:
-                conversation_id = self.conversation_manager.create_conversation(
-                    title=message[:50] + "..." if len(message) > 50 else message
-                )
+                # Generate a better title using the message content
+                title = self._generate_conversation_title(message)
+                conversation_id = self.conversation_manager.create_conversation(title)
             
             conversation = self.conversation_manager.get_conversation(conversation_id)
             if not conversation:
@@ -63,6 +63,14 @@ class ChatAgent(IAgent):
                 message,
                 metadata={"per_sub_k": per_sub_k}
             )
+            
+            # Update conversation title if this is one of the first few messages
+            # and the current title is generic
+            if len(conversation.messages) <= 3 and self._is_generic_title(conversation.title):
+                new_title = self._generate_conversation_title_from_conversation(conversation)
+                if new_title != conversation.title:
+                    self.conversation_manager.update_conversation_title(conversation_id, new_title)
+                    conversation.title = new_title
             
             # Build context for research
             research_context = {}
@@ -207,6 +215,111 @@ class ChatAgent(IAgent):
                 return self.response_generator.generate_follow_up_suggestions(research_result)
         
         return []
+    
+    def _generate_conversation_title(self, message: str) -> str:
+        """
+        Generate a conversation title from a single message.
+        
+        Args:
+            message: The user's message
+            
+        Returns:
+            Generated conversation title
+        """
+        # Clean and truncate the message
+        clean_message = message.strip()
+        
+        # If message is very short, use it as-is
+        if len(clean_message) <= 30:
+            return clean_message
+        
+        # If message is a question, try to extract the key part
+        if clean_message.endswith('?'):
+            # Remove common question words and extract the main topic
+            question_words = ['what', 'how', 'why', 'when', 'where', 'who', 'can', 'could', 'would', 'should']
+            words = clean_message.lower().split()
+            
+            # Find the first non-question word
+            for i, word in enumerate(words):
+                if word not in question_words:
+                    # Take from this word onwards, up to 30 characters
+                    remaining = ' '.join(words[i:])
+                    if len(remaining) <= 30:
+                        return remaining.capitalize()
+                    else:
+                        return remaining[:27] + "..."
+        
+        # For non-questions, try to extract key terms
+        # Look for technical terms or important keywords
+        important_keywords = [
+            'machine learning', 'artificial intelligence', 'ai', 'ml', 'data science',
+            'programming', 'python', 'javascript', 'react', 'database', 'sql',
+            'algorithm', 'neural network', 'deep learning', 'nlp', 'computer vision'
+        ]
+        
+        message_lower = clean_message.lower()
+        for keyword in important_keywords:
+            if keyword in message_lower:
+                # Find the position of the keyword and extract surrounding context
+                pos = message_lower.find(keyword)
+                start = max(0, pos - 10)
+                end = min(len(clean_message), pos + len(keyword) + 20)
+                extracted = clean_message[start:end].strip()
+                
+                if len(extracted) <= 30:
+                    return extracted
+                else:
+                    return extracted[:27] + "..."
+        
+        # Fallback: use first 30 characters
+        return clean_message[:27] + "..." if len(clean_message) > 30 else clean_message
+    
+    def _is_generic_title(self, title: str) -> bool:
+        """
+        Check if a title is generic and should be updated.
+        
+        Args:
+            title: The conversation title
+            
+        Returns:
+            True if the title is generic
+        """
+        generic_titles = [
+            "new conversation", "conversation", "chat", "untitled",
+            "untitled conversation", "new chat", "chat session"
+        ]
+        
+        return title.lower().strip() in generic_titles or len(title.strip()) < 5
+    
+    def _generate_conversation_title_from_conversation(self, conversation: Conversation) -> str:
+        """
+        Generate a conversation title from the conversation content.
+        
+        Args:
+            conversation: The conversation object
+            
+        Returns:
+            Generated conversation title
+        """
+        if not conversation or not conversation.messages:
+            return "New Conversation"
+        
+        # Get the theme from context builder
+        theme = self.context_builder.get_conversation_theme(conversation)
+        
+        # If we have a specific theme, use it
+        if theme and theme != "General conversation":
+            return theme.title()
+        
+        # Otherwise, try to generate from user messages
+        user_messages = [msg for msg in conversation.messages if msg.role == 'user']
+        
+        if not user_messages:
+            return "New Conversation"
+        
+        # Use the first user message to generate title
+        first_message = user_messages[0].content
+        return self._generate_conversation_title(first_message)
 
 
 if __name__ == "__main__":

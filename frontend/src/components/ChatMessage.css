@@ -205,3 +205,62 @@
     border-color: #805ad5;
   }
 }
+
+/* Subqueries Display Styles */
+.subqueries-display {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e1e8ed;
+}
+
+.subqueries-display h4 {
+  margin: 0 0 10px 0;
+  color: #2c3e50;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.subqueries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subquery-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+}
+
+.subquery-number {
+  font-weight: 600;
+  color: #667eea;
+  min-width: 20px;
+  font-size: 0.85em;
+}
+
+.subquery-text {
+  flex: 1;
+  font-size: 0.85em;
+  line-height: 1.4;
+  color: #2c3e50;
+}
+
+/* Responsive design for subqueries */
+@media (max-width: 768px) {
+  .subqueries-display h4 {
+    font-size: 0.85em;
+  }
+  
+  .subquery-item {
+    padding: 6px 10px;
+  }
+  
+  .subquery-text {
+    font-size: 0.8em;
+  }
+}

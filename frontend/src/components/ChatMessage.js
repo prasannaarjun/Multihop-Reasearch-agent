@@ -64,6 +64,24 @@ const ChatMessage = ({ message }) => {
                     📝 {message.metadata.research_result.citations?.length || 0} citations
                   </span>
                 </div>
+                
+                {message.metadata.research_result.subqueries && message.metadata.research_result.subqueries.length > 0 && (
+                  <div className="subqueries-display">
+                    <h4>Research Subqueries:</h4>
+                    {/* Debug: Log subqueries */}
+                    {console.log('Displaying subqueries:', message.metadata.research_result.subqueries)}
+                    <div className="subqueries-list">
+                      {message.metadata.research_result.subqueries.map((subquery, index) => (
+                        <div key={index} className="subquery-item">
+                          <span className="subquery-number">{index + 1}.</span>
+                          <span className="subquery-text">
+                            {typeof subquery === 'string' ? subquery : subquery.subquery || subquery.summary}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

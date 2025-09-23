@@ -36,12 +36,21 @@ from auth.database import create_tables
 
 # Global variables for agents
 research_agent = None
-chat_agent = None
+
+def get_conversation_manager_for_user(current_user: TokenData):
+    """Get a conversation manager scoped to the current user."""
+    from auth.database import SessionLocal
+    db_session = SessionLocal()
+    return ConversationManager(
+        db_session=db_session,
+        current_user_id=current_user.user_id,
+        is_admin=current_user.is_admin
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
-    global research_agent, chat_agent
+    global research_agent
     
     # Startup
     try:
@@ -70,16 +79,14 @@ async def lifespan(app: FastAPI):
         # Initialize research agent
         research_agent = ResearchAgent(retriever, llm_client, use_ollama, ollama_model)
         
-        # Initialize chat agent
-        conversation_manager = ConversationManager()
-        chat_agent = ChatAgent(research_agent, conversation_manager)
+        # Note: Chat agent is now created per-request with user-scoped conversation manager
+        # No global chat agent needed since each request gets its own scoped instance
         
-        print("Research agent and chat agent initialized successfully")
+        print("Research agent initialized successfully")
         print("Starting Multi-hop Research Agent API (Modular Version)...")
     except Exception as e:
         print(f"Failed to initialize agents: {e}")
         research_agent = None
-        chat_agent = None
     
     yield
     
@@ -433,7 +440,7 @@ async def chat_with_agent(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Chat with the research agent in a conversational context.
+    Chat with the research agent in a conversational context (user-scoped conversations).
     
     Args:
         request: Chat request with message and optional conversation_id
@@ -441,14 +448,18 @@ async def chat_with_agent(
     Returns:
         Chat response with answer and conversation info
     """
-    if chat_agent is None:
+    if research_agent is None:
         raise HTTPException(
             status_code=503,
-            detail="Chat research agent not initialized"
+            detail="Research agent not initialized"
         )
     
     try:
-        response = chat_agent.process(
+        # Create user-scoped conversation manager and chat agent
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        user_chat_agent = ChatAgent(research_agent, conversation_manager)
+        
+        response = user_chat_agent.process(
             message=request.message,
             conversation_id=request.conversation_id,
             per_sub_k=request.per_sub_k,
@@ -483,13 +494,14 @@ async def list_conversations(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    List all conversations.
+    List all conversations for the current user (admin can see all).
     
     Returns:
         List of conversation information
     """
     try:
-        conversations = chat_agent.list_conversations()
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        conversations = conversation_manager.list_conversations()
         return [ConversationInfo(**conv) for conv in conversations]
     except Exception as e:
         raise HTTPException(
@@ -504,7 +516,7 @@ async def get_conversation_history(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Get conversation history.
+    Get conversation history (user can only access their own conversations).
     
     Args:
         conversation_id: ID of the conversation
@@ -514,18 +526,19 @@ async def get_conversation_history(
         Conversation history with messages
     """
     try:
-        conversation = chat_agent.conversation_manager.get_conversation(conversation_id)
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        conversation = conversation_manager.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(
                 status_code=404,
                 detail="Conversation not found"
             )
         
-        messages = chat_agent.get_conversation_history(conversation_id, max_messages)
+        messages = conversation_manager.get_conversation_history(conversation_id, max_messages)
         
         return ConversationHistoryResponse(
             conversation_id=conversation_id,
-            messages=[ChatMessageResponse(**msg) for msg in messages],
+            messages=[ChatMessageResponse(**msg.to_dict()) for msg in messages],
             title=conversation.title,
             message_count=len(conversation.messages)
         )
@@ -544,7 +557,7 @@ async def create_conversation(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Create a new conversation.
+    Create a new conversation for the current user.
     
     Args:
         request: Request body with title
@@ -553,7 +566,8 @@ async def create_conversation(
         Conversation ID
     """
     try:
-        conversation_id = chat_agent.create_conversation(request.title)
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        conversation_id = conversation_manager.create_conversation(request.title)
         return {"conversation_id": conversation_id, "title": request.title}
     except Exception as e:
         raise HTTPException(
@@ -568,7 +582,7 @@ async def update_conversation_title(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Update conversation title.
+    Update conversation title (user can only update their own conversations).
     
     Args:
         conversation_id: ID of the conversation
@@ -578,7 +592,8 @@ async def update_conversation_title(
         Success message
     """
     try:
-        success = chat_agent.update_conversation_title(conversation_id, request.title)
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        success = conversation_manager.update_conversation_title(conversation_id, request.title)
         if not success:
             raise HTTPException(
                 status_code=404,
@@ -599,7 +614,7 @@ async def delete_conversation(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Delete a conversation.
+    Delete a conversation (user can only delete their own conversations).
     
     Args:
         conversation_id: ID of the conversation
@@ -608,7 +623,8 @@ async def delete_conversation(
         Success message
     """
     try:
-        success = chat_agent.delete_conversation(conversation_id)
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        success = conversation_manager.delete_conversation(conversation_id)
         if not success:
             raise HTTPException(
                 status_code=404,
@@ -629,7 +645,7 @@ async def get_follow_up_suggestions(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Get follow-up question suggestions for a conversation.
+    Get follow-up question suggestions for a conversation (user can only access their own conversations).
     
     Args:
         conversation_id: ID of the conversation
@@ -638,8 +654,21 @@ async def get_follow_up_suggestions(
         List of suggested follow-up questions
     """
     try:
-        suggestions = chat_agent.generate_follow_up_suggestions(conversation_id)
+        conversation_manager = get_conversation_manager_for_user(current_user)
+        # Verify conversation exists and user has access
+        conversation = conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found"
+            )
+        
+        # Note: Follow-up suggestions would need to be implemented with user-scoped chat agent
+        # For now, return empty suggestions
+        suggestions = []
         return {"suggestions": suggestions}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,

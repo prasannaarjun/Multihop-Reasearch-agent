@@ -5,9 +5,12 @@ Database configuration and models for authentication
 import os
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Note: ConversationDB and ChatMessageDB are now imported in agents/shared/models.py
+# and use the same Base, so they're automatically included in metadata
 
 load_dotenv()
 
@@ -40,6 +43,9 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
     profile_data = Column(Text, nullable=True)  # JSON string for additional user data
+    
+    # Relationship to conversations
+    conversations = relationship("ConversationDB", back_populates="user")
 
 class UserSession(Base):
     """User session model for tracking active sessions"""
@@ -64,6 +70,10 @@ def get_db():
 
 def create_tables():
     """Create all tables in the database"""
+    # Import the shared models to ensure they're registered with the Base
+    from agents.shared.models import ConversationDB, ChatMessageDB
+    
+    # Create all tables (all models now use the same Base)
     Base.metadata.create_all(bind=engine)
 
 def drop_tables():

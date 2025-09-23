@@ -6,6 +6,13 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from enum import Enum
+import uuid
+
+# SQLAlchemy imports for database models
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
 
 
 class MessageRole(Enum):
@@ -153,3 +160,71 @@ class ChatResponse:
     timestamp: str
     research_result: Optional[ResearchResult] = None
     error: Optional[str] = None
+
+
+# SQLAlchemy Database Models
+# Import Base from auth.database to ensure all models share the same metadata
+from auth.database import Base
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+
+# Database-agnostic column types
+def get_uuid_column():
+    """Get UUID column type based on database dialect."""
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
+    
+    @event.listens_for(Engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        if hasattr(dbapi_connection, 'execute'):
+            # Check if it's SQLite
+            if 'sqlite' in str(type(dbapi_connection)):
+                # Use String for SQLite, UUID for PostgreSQL
+                return String(36)
+        return PostgresUUID(as_uuid=True)
+    
+    return PostgresUUID(as_uuid=True)
+
+
+def get_json_column():
+    """Get JSON column type based on database dialect."""
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy import JSON
+    
+    # For now, use JSON for compatibility, JSONB for PostgreSQL
+    return JSONB
+
+
+class ConversationDB(Base):
+    """SQLAlchemy model for conversations stored in database."""
+    __tablename__ = "conversations"
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    conversation_metadata = Column(Text, nullable=True)  # Store as JSON string for compatibility
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Relationship to messages
+    messages = relationship("ChatMessageDB", back_populates="conversation", cascade="all, delete-orphan")
+    
+    # Relationship to user
+    user = relationship("User", back_populates="conversations")
+
+
+class ChatMessageDB(Base):
+    """SQLAlchemy model for chat messages stored in database."""
+    __tablename__ = "chat_messages"
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id = Column(String(36), ForeignKey("conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    message_metadata = Column(Text, nullable=True)  # Store as JSON string for compatibility
+    
+    # Relationship to conversation
+    conversation = relationship("ConversationDB", back_populates="messages")

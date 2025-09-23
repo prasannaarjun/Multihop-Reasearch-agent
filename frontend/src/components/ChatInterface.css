@@ -5,6 +5,37 @@
   background: #f5f5f5;
 }
 
+/* Loading Message Styles */
+.loading-message {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.loading-icon {
+  font-size: 1.5em;
+  animation: pulse 2s infinite;
+}
+
+.loading-text {
+  color: #6c757d;
+  font-size: 1em;
+  font-weight: 500;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .chat-sidebar {
   width: 300px;
   background: white;

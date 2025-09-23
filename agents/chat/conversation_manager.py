@@ -8,171 +8,284 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 from ..shared.interfaces import IConversationManager
-from ..shared.models import Conversation, ChatMessage
+from ..shared.models import Conversation, ChatMessage, ConversationDB, ChatMessageDB
 from ..shared.exceptions import ConversationError
 
 
 class ConversationManager(IConversationManager):
-    """Manages chat conversations and state."""
+    """Manages chat conversations and state using PostgreSQL."""
     
-    def __init__(self, persist_directory: str = "chat_data"):
+    def __init__(self, db_session: Session, current_user_id: Optional[int] = None, is_admin: bool = False):
         """
         Initialize conversation manager.
         
         Args:
-            persist_directory: Directory to persist conversation data
+            db_session: SQLAlchemy database session
+            current_user_id: ID of the current user (for isolation)
+            is_admin: Whether the current user is an admin (can see all conversations)
         """
-        self.persist_directory = persist_directory
-        self.conversations: Dict[str, Conversation] = {}
+        self.db = db_session
+        self.current_user_id = current_user_id
+        self.is_admin = is_admin
         self.active_conversation_id: Optional[str] = None
-        
-        # Ensure persist directory exists
-        os.makedirs(persist_directory, exist_ok=True)
-        
-        # Load existing conversations
-        self._load_conversations()
     
-    def _load_conversations(self):
-        """Load conversations from disk."""
-        conversations_file = os.path.join(self.persist_directory, "conversations.json")
-        if os.path.exists(conversations_file):
-            try:
-                with open(conversations_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    for conv_data in data.get('conversations', []):
-                        conv = Conversation.from_dict(conv_data)
-                        self.conversations[conv.id] = conv
-            except Exception as e:
-                print(f"Error loading conversations: {e}")
-    
-    def _save_conversations(self):
-        """Save conversations to disk."""
-        conversations_file = os.path.join(self.persist_directory, "conversations.json")
-        try:
-            data = {
-                'conversations': [conv.to_dict() for conv in self.conversations.values()],
-                'active_conversation_id': self.active_conversation_id
-            }
-            with open(conversations_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving conversations: {e}")
+    def _get_user_filter(self):
+        """Get the user filter for queries (admin can see all)."""
+        if self.is_admin:
+            return True  # Admin can see all conversations
+        elif self.current_user_id:
+            return ConversationDB.user_id == self.current_user_id
+        else:
+            return False  # No user, no conversations
     
     def create_conversation(self, title: str = "New Conversation") -> str:
         """Create a new conversation."""
-        conversation_id = str(uuid.uuid4())
-        conversation = Conversation(
-            id=conversation_id,
+        if not self.current_user_id:
+            raise ConversationError("User must be authenticated to create conversations")
+        
+        conversation_db = ConversationDB(
+            user_id=self.current_user_id,
             title=title,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            messages=[],
-            context={}
+            conversation_metadata=json.dumps({})
         )
-        self.conversations[conversation_id] = conversation
-        self.active_conversation_id = conversation_id
-        self._save_conversations()
-        return conversation_id
+        self.db.add(conversation_db)
+        self.db.commit()
+        self.db.refresh(conversation_db)
+        
+        self.active_conversation_id = str(conversation_db.id)
+        return str(conversation_db.id)
     
     def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Get a conversation by ID."""
-        return self.conversations.get(conversation_id)
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return None
+        
+        query = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id)
+        
+        # Apply user filter
+        if not self.is_admin and self.current_user_id:
+            query = query.filter(ConversationDB.user_id == self.current_user_id)
+        elif not self.is_admin:
+            return None  # No user, no access
+        
+        conversation_db = query.first()
+        if not conversation_db:
+            return None
+        
+        return self._db_to_conversation(conversation_db)
     
     def get_active_conversation(self) -> Optional[Conversation]:
         """Get the currently active conversation."""
         if self.active_conversation_id:
-            return self.conversations.get(self.active_conversation_id)
+            return self.get_conversation(self.active_conversation_id)
         return None
     
     def set_active_conversation(self, conversation_id: str) -> bool:
         """Set the active conversation."""
-        if conversation_id in self.conversations:
+        conversation = self.get_conversation(conversation_id)
+        if conversation:
             self.active_conversation_id = conversation_id
-            self._save_conversations()
             return True
         return False
     
     def add_message(self, conversation_id: str, role: str, content: str, 
                    metadata: Optional[Dict[str, Any]] = None) -> Optional[ChatMessage]:
         """Add a message to a conversation."""
-        conversation = self.conversations.get(conversation_id)
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return None
+        
+        # Verify conversation exists and user has access
+        conversation = self.get_conversation(conversation_id)
         if not conversation:
             return None
         
-        message = conversation.add_message(role, content, metadata)
-        self._save_conversations()
-        return message
+        # Create message in database
+        message_db = ChatMessageDB(
+            conversation_id=str(conv_uuid),
+            role=role,
+            content=content,
+            message_metadata=json.dumps(metadata or {})
+        )
+        self.db.add(message_db)
+        
+        # Update conversation timestamp
+        conversation_db = self.db.query(ConversationDB).filter(ConversationDB.id == str(conv_uuid)).first()
+        if conversation_db:
+            conversation_db.updated_at = datetime.now()
+        
+        self.db.commit()
+        self.db.refresh(message_db)
+        
+        return self._db_to_message(message_db)
     
     def get_conversation_history(self, conversation_id: str, max_messages: int = 50) -> List[ChatMessage]:
         """Get conversation history."""
-        conversation = self.conversations.get(conversation_id)
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return []
+        
+        # Verify access
+        conversation = self.get_conversation(conversation_id)
         if not conversation:
             return []
         
-        return conversation.get_recent_context(max_messages)
+        # Get messages from database
+        messages_db = self.db.query(ChatMessageDB).filter(
+            ChatMessageDB.conversation_id == conversation_id
+        ).order_by(ChatMessageDB.created_at.desc()).limit(max_messages).all()
+        
+        return [self._db_to_message(msg) for msg in reversed(messages_db)]
     
     def list_conversations(self) -> List[Dict[str, Any]]:
         """List all conversations with basic info."""
+        query = self.db.query(ConversationDB)
+        
+        # Apply user filter
+        if not self.is_admin and self.current_user_id:
+            query = query.filter(ConversationDB.user_id == self.current_user_id)
+        elif not self.is_admin:
+            return []  # No user, no conversations
+        
+        conversations_db = query.order_by(ConversationDB.updated_at.desc()).all()
+        
         conversations = []
-        for conv in self.conversations.values():
+        for conv_db in conversations_db:
+            message_count = self.db.query(ChatMessageDB).filter(
+                ChatMessageDB.conversation_id == conv_db.id
+            ).count()
+            
             conversations.append({
-                'id': conv.id,
-                'title': conv.title,
-                'created_at': conv.created_at.isoformat(),
-                'updated_at': conv.updated_at.isoformat(),
-                'message_count': len(conv.messages),
-                'is_active': conv.id == self.active_conversation_id
+                'id': str(conv_db.id),
+                'title': conv_db.title,
+                'created_at': conv_db.created_at.isoformat(),
+                'updated_at': conv_db.updated_at.isoformat(),
+                'message_count': message_count,
+                'is_active': str(conv_db.id) == self.active_conversation_id
             })
         
-        # Sort by updated_at descending
-        conversations.sort(key=lambda x: x['updated_at'], reverse=True)
         return conversations
     
     def delete_conversation(self, conversation_id: str) -> bool:
         """Delete a conversation."""
-        if conversation_id in self.conversations:
-            del self.conversations[conversation_id]
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return False
+        
+        # Verify access
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            return False
+        
+        # Delete from database (cascade will handle messages)
+        conversation_db = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id).first()
+        if conversation_db:
+            self.db.delete(conversation_db)
+            self.db.commit()
+            
             if self.active_conversation_id == conversation_id:
                 self.active_conversation_id = None
-            self._save_conversations()
             return True
         return False
     
     def update_conversation_title(self, conversation_id: str, title: str) -> bool:
         """Update conversation title."""
-        conversation = self.conversations.get(conversation_id)
-        if conversation:
-            conversation.title = title
-            conversation.updated_at = datetime.now()
-            self._save_conversations()
+        try:
+            conv_uuid = uuid.UUID(conversation_id)
+        except ValueError:
+            return False
+        
+        # Verify access
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            return False
+        
+        # Update in database
+        conversation_db = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id).first()
+        if conversation_db:
+            conversation_db.title = title
+            conversation_db.updated_at = datetime.now()
+            self.db.commit()
             return True
         return False
     
     def get_conversation_context(self, conversation_id: str) -> Dict[str, Any]:
         """Get conversation context for research agent."""
-        conversation = self.conversations.get(conversation_id)
+        conversation = self.get_conversation(conversation_id)
         if not conversation:
             return {}
         
         # Build context from recent messages
-        recent_messages = conversation.get_recent_context(10)
+        recent_messages = self.get_conversation_history(conversation_id, 10)
         context = {
             'conversation_id': conversation_id,
             'recent_messages': [msg.to_dict() for msg in recent_messages],
-            'conversation_summary': conversation.get_conversation_summary(),
-            'message_count': len(conversation.messages)
+            'conversation_summary': self.get_conversation_summary(conversation_id),
+            'message_count': len(recent_messages)
         }
         
         return context
     
     def get_conversation_summary(self, conversation_id: str) -> str:
         """Get a summary of the conversation."""
-        conversation = self.conversations.get(conversation_id)
+        conversation = self.get_conversation(conversation_id)
         if not conversation:
             return "Conversation not found."
         
         return conversation.get_conversation_summary()
+    
+    def _db_to_conversation(self, conv_db: ConversationDB) -> Conversation:
+        """Convert ConversationDB to Conversation dataclass."""
+        # Get messages for this conversation
+        messages_db = self.db.query(ChatMessageDB).filter(
+            ChatMessageDB.conversation_id == conv_db.id
+        ).order_by(ChatMessageDB.created_at).all()
+        
+        messages = [self._db_to_message(msg) for msg in messages_db]
+        
+        # Parse metadata from JSON string
+        metadata = {}
+        if conv_db.conversation_metadata:
+            try:
+                metadata = json.loads(conv_db.conversation_metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        
+        return Conversation(
+            id=str(conv_db.id),
+            title=conv_db.title,
+            created_at=conv_db.created_at,
+            updated_at=conv_db.updated_at,
+            messages=messages,
+            context=metadata,
+            is_active=conv_db.is_active
+        )
+    
+    def _db_to_message(self, msg_db: ChatMessageDB) -> ChatMessage:
+        """Convert ChatMessageDB to ChatMessage dataclass."""
+        # Parse metadata from JSON string
+        metadata = {}
+        if msg_db.message_metadata:
+            try:
+                metadata = json.loads(msg_db.message_metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        
+        return ChatMessage(
+            id=str(msg_db.id),
+            role=msg_db.role,
+            content=msg_db.content,
+            timestamp=msg_db.created_at,
+            metadata=metadata
+        )
 
 
 if __name__ == "__main__":
@@ -180,26 +293,10 @@ if __name__ == "__main__":
     print("Testing Conversation Manager")
     print("=" * 50)
     
-    # Create a test conversation
-    manager = ConversationManager()
-    conv_id = manager.create_conversation("Test Conversation")
-    print(f"Created conversation: {conv_id}")
-    
-    # Add some messages
-    manager.add_message(conv_id, "user", "Hello, I need help with machine learning")
-    manager.add_message(conv_id, "assistant", "I'd be happy to help you with machine learning! What specific topic would you like to explore?")
-    manager.add_message(conv_id, "user", "What are the best algorithms for image classification?")
-    
-    # Get conversation history
-    history = manager.get_conversation_history(conv_id)
-    print(f"\nConversation history ({len(history)} messages):")
-    for msg in history:
-        print(f"  {msg.role}: {msg.content[:50]}...")
-    
-    # List conversations
-    conversations = manager.list_conversations()
-    print(f"\nAll conversations ({len(conversations)}):")
-    for conv in conversations:
-        print(f"  {conv['title']} - {conv['message_count']} messages")
-    
-    print("\nTest completed!")
+    # Note: This test requires a database session and user authentication
+    # For actual testing, use the test files in the tests/ directory
+    print("Database-based ConversationManager requires:")
+    print("- Database session (SessionLocal)")
+    print("- Authenticated user (user_id)")
+    print("- Admin privileges (is_admin)")
+    print("\nUse tests/test_conversation_manager.py for proper testing")
