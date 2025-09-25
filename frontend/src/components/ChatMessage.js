@@ -68,8 +68,6 @@ const ChatMessage = ({ message }) => {
                 {message.metadata.research_result.subqueries && message.metadata.research_result.subqueries.length > 0 && (
                   <div className="subqueries-display">
                     <h4>Research Subqueries:</h4>
-                    {/* Debug: Log subqueries */}
-                    {console.log('Displaying subqueries:', message.metadata.research_result.subqueries)}
                     <div className="subqueries-list">
                       {message.metadata.research_result.subqueries.map((subquery, index) => (
                         <div key={index} className="subquery-item">

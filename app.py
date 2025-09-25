@@ -3,7 +3,7 @@ Multi-hop Research Agent API - Modular Version
 Updated to use the new modular agent architecture.
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,8 +21,8 @@ logging.getLogger("passlib").setLevel(logging.ERROR)
 # Import modular components
 from agents.research import ResearchAgent, DocumentRetriever
 from agents.chat import ChatAgent, ConversationManager
-from agents.shared.models import ResearchResult, ChatResponse, ChatMessage, ConversationInfo
-from agents.shared.exceptions import AgentError, RetrievalError, ConversationError
+from agents.shared.models import ResearchResult, ChatMessage, ConversationInfo
+from agents.shared.exceptions import AgentError
 
 # Import existing utilities
 from report import generate_markdown_report, save_report
@@ -31,7 +31,7 @@ from file_processor import file_processor
 from ollama_client import OllamaClient
 
 # Authentication imports
-from auth import auth_router, get_current_active_user, get_optional_current_user, TokenData
+from auth import auth_router, get_current_active_user, TokenData
 from auth.database import create_tables
 
 # Global variables for agents

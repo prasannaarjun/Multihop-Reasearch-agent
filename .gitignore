@@ -400,3 +400,5 @@ local_settings.py
 # Alembic
 alembic/versions/
 alembic.ini
+
+.pytest_cache/

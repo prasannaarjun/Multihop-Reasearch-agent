@@ -87,7 +87,7 @@ chat_research_agent = ChatResearchAgent(persist_directory="chroma_db")
 
 **After:**
 ```python
-# app_modular.py
+# app.py (updated to use modular architecture)
 from agents.research import ResearchAgent, DocumentRetriever
 from agents.chat import ChatAgent, ConversationManager
 
@@ -143,14 +143,11 @@ chat_agent = ChatAgent(research_agent, conversation_manager)
 
 ### Step 3: Update API Endpoints
 
-Use the new `app_modular.py` instead of `app.py`:
+The current `app.py` has been updated to use the modular architecture:
 
 ```bash
-# Old way
+# Run the modular version
 python app.py
-
-# New way
-python app_modular.py
 ```
 
 ### Step 4: Update Tests

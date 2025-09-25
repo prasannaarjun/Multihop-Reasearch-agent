@@ -58,7 +58,7 @@ python embeddings.py
 
 5. **Run the modular API:**
 ```bash
-python app_modular.py
+python app.py
 ```
 
 ## 📚 Component Documentation
