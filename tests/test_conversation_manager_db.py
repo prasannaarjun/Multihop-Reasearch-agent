@@ -312,6 +312,44 @@ class TestConversationManagerDB:
         ).count()
         assert remaining_messages == 0
 
+    def test_add_highlight_appends_metadata(self, db_session, conversation_manager_user1):
+        """Test that highlights are appended to conversation metadata."""
+        conv_id = conversation_manager_user1.create_conversation("Highlight Conversation")
+
+        stored_highlights = conversation_manager_user1.add_highlight(conv_id, "Important fact")
+        assert stored_highlights == ["Important fact"]
+
+        conversation = conversation_manager_user1.get_conversation(conv_id)
+        assert conversation is not None
+        assert conversation.context.get("highlights") == ["Important fact"]
+
+        stored_highlights = conversation_manager_user1.add_highlight(conv_id, "Second note")
+        assert stored_highlights == ["Important fact", "Second note"]
+
+        conversation = conversation_manager_user1.get_conversation(conv_id)
+        assert conversation.context.get("highlights") == ["Important fact", "Second note"]
+
+    def test_add_highlight_enforces_limit(self, db_session, conversation_manager_user1, monkeypatch):
+        """Test that highlight storage respects the maximum configured limit."""
+        conv_id = conversation_manager_user1.create_conversation("Highlight Limit Conversation")
+
+        # Temporarily ensure limit is small for test determinism
+        from agents.chat import conversation_manager as cm_module
+
+        original_limit = cm_module.MAX_STORED_HIGHLIGHTS
+        monkeypatch.setattr(cm_module, "MAX_STORED_HIGHLIGHTS", 3)
+
+        try:
+            for idx in range(5):
+                stored = conversation_manager_user1.add_highlight(conv_id, f"Highlight {idx}")
+
+            assert stored == ["Highlight 2", "Highlight 3", "Highlight 4"]
+
+            conversation = conversation_manager_user1.get_conversation(conv_id)
+            assert conversation.context.get("highlights") == ["Highlight 2", "Highlight 3", "Highlight 4"]
+        finally:
+            monkeypatch.setattr(cm_module, "MAX_STORED_HIGHLIGHTS", original_limit)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

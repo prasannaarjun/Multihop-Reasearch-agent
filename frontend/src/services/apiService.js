@@ -191,14 +191,15 @@ class ApiService {
   }
 
   // Chat API methods
-  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true) {
+  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true, selectedText = null) {
     const response = await this.request('/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
         conversation_id: conversationId,
         per_sub_k: perSubK,
-        include_context: includeContext
+        include_context: includeContext,
+        selected_text: selectedText
       }),
     });
     
@@ -215,6 +216,7 @@ class ApiService {
       error: response.error
     };
   }
+
 
   async getConversations() {
     const conversations = await this.request('/conversations');

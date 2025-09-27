@@ -11,7 +11,8 @@ from .auth_service import AuthService
 from .auth_models import TokenData
 
 # HTTP Bearer token scheme
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+optional_security = HTTPBearer(auto_error=False)
 
 class AuthMiddleware:
     """Authentication middleware class"""
@@ -29,6 +30,8 @@ class AuthMiddleware:
         )
         
         try:
+            if credentials is None:
+                raise credentials_exception
             token = credentials.credentials
             auth_service = AuthService(db)
             token_data = auth_service.verify_token(token)
@@ -71,7 +74,7 @@ class AuthMiddleware:
     
     @staticmethod
     def get_optional_current_user(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
         db: Session = Depends(get_db)
     ) -> Optional[TokenData]:
         """Get current user if authenticated, None otherwise"""
@@ -117,7 +120,7 @@ def get_current_admin_user(
     return AuthMiddleware.get_current_admin_user(current_user)
 
 def get_optional_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
     db: Session = Depends(get_db)
 ) -> Optional[TokenData]:
     """Dependency to get current user if authenticated"""

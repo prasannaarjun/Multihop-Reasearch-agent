@@ -161,6 +161,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     per_sub_k: int = 3
     include_context: bool = True
+    selected_text: Optional[str] = None
 
 class ChatResponseModel(BaseModel):
     conversation_id: str
@@ -459,8 +460,21 @@ async def chat_with_agent(
         conversation_manager = get_conversation_manager_for_user(current_user)
         user_chat_agent = ChatAgent(research_agent, conversation_manager)
         
+        # If selected text is provided, store it as a highlight
+        if request.selected_text and request.conversation_id:
+            conversation_manager.add_highlight(request.conversation_id, request.selected_text)
+        
+        # Create enhanced message with highlight context if selected text is provided
+        enhanced_message = request.message
+        if request.selected_text:
+            enhanced_message = f"""[Context from user highlight]:
+"{request.selected_text}"
+
+[User question]:
+"{request.message}" """
+        
         response = user_chat_agent.process(
-            message=request.message,
+            message=enhanced_message,
             conversation_id=request.conversation_id,
             per_sub_k=request.per_sub_k,
             include_context=request.include_context

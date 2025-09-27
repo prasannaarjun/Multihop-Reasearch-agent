@@ -3,6 +3,8 @@ import './ChatInterface.css';
 import ChatMessage from './ChatMessage';
 import ConversationList from './ConversationList';
 import FileUpload from './FileUpload';
+import HighlightListener from './HighlightListener';
+import AskModelModal from './AskModelModal';
 import { apiService } from '../services/apiService';
 
 const ChatInterface = ({ onToggleMode, isResearchMode }) => {
@@ -14,6 +16,8 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   const [error, setError] = useState(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(null);
+  const [askModelModalOpen, setAskModelModalOpen] = useState(false);
+  const [askModelHighlight, setAskModelHighlight] = useState('');
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -63,7 +67,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     }
   };
 
-  const sendMessage = async () => {
+  const sendMessage = async (selectedText = null) => {
     if (!inputMessage.trim() || isLoading) return;
 
     const userMessage = {
@@ -84,7 +88,8 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
         inputMessage,
         currentConversation?.conversation_id,
         3,
-        true
+        true,
+        selectedText
       );
 
       const assistantMessage = {
@@ -114,13 +119,17 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
       setError(err.message || 'Failed to send message');
     } finally {
       setIsLoading(false);
+      // Clear highlight after sending message
+      if (selectedText) {
+        setAskModelHighlight('');
+      }
     }
   };
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      sendMessage(askModelHighlight);
     }
   };
 
@@ -149,8 +158,45 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     setShowFileUpload(false);
   };
 
+  const handleHighlight = (highlightText, conversationId) => {
+    if (!highlightText) {
+      return;
+    }
+
+    // Only check conversation ID if we have one
+    if (conversationId && currentConversation && currentConversation.conversation_id !== conversationId) {
+      return;
+    }
+
+    setAskModelHighlight(highlightText);
+    setAskModelModalOpen(false);
+  };
+
+  const handleAskModelResponse = (assistantMessage) => {
+    if (!assistantMessage) {
+      return;
+    }
+
+    setMessages((prev) => [...prev, assistantMessage]);
+    setTimeout(() => scrollToBottom(), 50);
+    loadConversations();
+    // Clear the highlight once response is received
+    setAskModelHighlight('');
+    setAskModelModalOpen(false);
+  };
+
+  const handleAskModelModalClose = () => {
+    setAskModelModalOpen(false);
+  };
+
+  const clearHighlight = () => {
+    setAskModelHighlight('');
+    setAskModelModalOpen(false);
+  };
+
   return (
     <div className="chat-interface">
+      <HighlightListener onHighlight={handleHighlight} />
       <div className="chat-sidebar">
         <div className="chat-sidebar-header">
           <h3>💬 Conversations</h3>
@@ -172,28 +218,6 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
       </div>
 
       <div className="chat-main">
-        <div className="chat-main-header">
-          <div className="chat-title">
-            {currentConversation ? currentConversation.title : 'Select a conversation'}
-          </div>
-          <div className="chat-actions">
-            <button 
-              className="upload-btn"
-              onClick={() => setShowFileUpload(true)}
-              title="Upload Documents"
-            >
-              📁 Upload
-            </button>
-            <button 
-              className="mode-toggle-btn"
-              onClick={onToggleMode}
-              title="Switch to Research Mode"
-            >
-              🔍 Research
-            </button>
-          </div>
-        </div>
-
         <div className="chat-messages">
           {messages.length === 0 ? (
             <div className="empty-chat">
@@ -201,18 +225,16 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
               <p>Start a conversation with the research agent</p>
               <p>Ask questions and get comprehensive answers based on your documents</p>
               <div className="empty-chat-actions">
-                <button
-                  className="upload-empty-btn"
-                  onClick={() => setShowFileUpload(true)}
-                  title="Upload Documents"
-                >
-                  📁 Upload Documents
-                </button>
+                <p>Use the 📁 button below to upload documents and start chatting!</p>
               </div>
             </div>
           ) : (
             messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
+              <ChatMessage
+                key={message.id}
+                message={message}
+                conversationId={currentConversation?.conversation_id}
+              />
             ))
           )}
           
@@ -269,8 +291,35 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
           </div>
         )}
 
+        {askModelHighlight && (
+          <div className="selected-text-box">
+            <div className="selected-text-header">
+              <span className="selected-text-label">Selected Text</span>
+              <button
+                type="button"
+                className="selected-text-clear"
+                onClick={clearHighlight}
+                title="Clear selection"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="selected-text-content">
+              {askModelHighlight}
+            </div>
+          </div>
+        )}
+
         <div className="chat-input">
           <div className="chat-input-actions">
+            <button
+              className="mode-toggle-btn-input"
+              onClick={onToggleMode}
+              title="Switch to Research Mode"
+              disabled={isLoading}
+            >
+              🔍
+            </button>
             <button
               className="upload-small-btn"
               onClick={() => setShowFileUpload(true)}
@@ -284,18 +333,25 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask a question or start a conversation... (Tip: Upload documents with 📁 button)"
+            placeholder={askModelHighlight ? "Ask a question about the selected text..." : "Ask a question or start a conversation... (Tip: Upload documents with 📁 button)"}
             disabled={isLoading}
             rows="3"
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage(askModelHighlight)}
             disabled={!inputMessage.trim() || isLoading}
             className="send-btn"
           >
             Send
           </button>
         </div>
+        <AskModelModal
+          isOpen={askModelModalOpen}
+          onClose={handleAskModelModalClose}
+          conversationId={currentConversation?.conversation_id}
+          initialHighlight={askModelHighlight}
+          onResponse={handleAskModelResponse}
+        />
       </div>
     </div>
   );

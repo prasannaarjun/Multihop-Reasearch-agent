@@ -9,6 +9,9 @@ import shutil
 from unittest.mock import Mock, MagicMock
 from datetime import datetime
 
+# Ensure highlights limit is accessible during tests
+from agents.chat.conversation_manager import MAX_STORED_HIGHLIGHTS
+
 # Set test environment variables
 os.environ["DATABASE_URL"] = "sqlite:///./test_auth.db"
 os.environ["SECRET_KEY"] = "test-secret-key"

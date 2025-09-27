@@ -15,6 +15,9 @@ from ..shared.models import Conversation, ChatMessage, ConversationDB, ChatMessa
 from ..shared.exceptions import ConversationError
 
 
+MAX_STORED_HIGHLIGHTS = 10
+
+
 class ConversationManager(IConversationManager):
     """Manages chat conversations and state using PostgreSQL."""
     
@@ -60,23 +63,9 @@ class ConversationManager(IConversationManager):
     
     def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Get a conversation by ID."""
-        try:
-            conv_uuid = uuid.UUID(conversation_id)
-        except ValueError:
-            return None
-        
-        query = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id)
-        
-        # Apply user filter
-        if not self.is_admin and self.current_user_id:
-            query = query.filter(ConversationDB.user_id == self.current_user_id)
-        elif not self.is_admin:
-            return None  # No user, no access
-        
-        conversation_db = query.first()
+        conversation_db = self._get_conversation_db(conversation_id)
         if not conversation_db:
             return None
-        
         return self._db_to_conversation(conversation_db)
     
     def get_active_conversation(self) -> Optional[Conversation]:
@@ -241,6 +230,36 @@ class ConversationManager(IConversationManager):
             return "Conversation not found."
         
         return conversation.get_conversation_summary()
+
+    def add_highlight(self, conversation_id: str, highlight: str) -> Optional[List[str]]:
+        """Append a highlight to the conversation metadata and return stored highlights."""
+        conversation_db = self._get_conversation_db(conversation_id)
+        if not conversation_db:
+            return None
+
+        metadata: Dict[str, Any] = {}
+        if conversation_db.conversation_metadata:
+            try:
+                metadata = json.loads(conversation_db.conversation_metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+
+        highlights = metadata.get("highlights", [])
+        if not isinstance(highlights, list):
+            highlights = []
+
+        highlights.append(highlight)
+        if MAX_STORED_HIGHLIGHTS and len(highlights) > MAX_STORED_HIGHLIGHTS:
+            highlights = highlights[-MAX_STORED_HIGHLIGHTS:]
+
+        metadata["highlights"] = highlights
+        conversation_db.conversation_metadata = json.dumps(metadata)
+        conversation_db.updated_at = datetime.now()
+
+        self.db.commit()
+        self.db.refresh(conversation_db)
+
+        return highlights
     
     def _db_to_conversation(self, conv_db: ConversationDB) -> Conversation:
         """Convert ConversationDB to Conversation dataclass."""
@@ -286,6 +305,22 @@ class ConversationManager(IConversationManager):
             timestamp=msg_db.created_at,
             metadata=metadata
         )
+
+    def _get_conversation_db(self, conversation_id: str) -> Optional[ConversationDB]:
+        """Internal helper to fetch a conversation DB record with access control."""
+        try:
+            uuid.UUID(conversation_id)
+        except ValueError:
+            return None
+
+        query = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id)
+
+        if not self.is_admin and self.current_user_id:
+            query = query.filter(ConversationDB.user_id == self.current_user_id)
+        elif not self.is_admin:
+            return None
+
+        return query.first()
 
 
 if __name__ == "__main__":

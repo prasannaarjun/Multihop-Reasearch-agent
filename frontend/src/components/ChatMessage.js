@@ -1,7 +1,7 @@
 import React from 'react';
 import './ChatMessage.css';
 
-const ChatMessage = ({ message }) => {
+const ChatMessage = ({ message, conversationId }) => {
   const formatTimestamp = (timestamp) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -18,9 +18,12 @@ const ChatMessage = ({ message }) => {
   const isUser = message.role === 'user';
   const hasResearchData = message.metadata?.research_result;
   const contextUsed = message.metadata?.context_used;
+  const highlights = message.metadata?.highlights;
+  const highlightTruncated = message.metadata?.highlight_truncated;
+  const conversationMetaId = message.metadata?.conversation_id;
 
   return (
-    <div className={`message ${message.role}`}>
+    <div className={`message ${message.role}`}> 
       <div className="message-header">
         <div className="message-role">
           {isUser ? '👤 You' : '🤖 Research Agent'}
@@ -30,7 +33,11 @@ const ChatMessage = ({ message }) => {
         </div>
       </div>
       
-      <div className="message-content">
+      <div
+        className="message-content"
+        data-message-id={message.id}
+        data-conversation-id={conversationMetaId || message.conversation_id || conversationId}
+      >
         <div 
           className="message-text"
           dangerouslySetInnerHTML={{ 
@@ -81,6 +88,20 @@ const ChatMessage = ({ message }) => {
                   </div>
                 )}
               </div>
+            )}
+          </div>
+        )}
+
+        {highlights && highlights.length > 0 && (
+          <div className="highlight-context">
+            <h4>Highlight context</h4>
+            <ul>
+              {highlights.map((item, index) => (
+                <li key={index}>{item}</li>
+              ))}
+            </ul>
+            {highlightTruncated && (
+              <div className="highlight-warning">Note: highlight truncated due to length limits.</div>
             )}
           </div>
         )}
