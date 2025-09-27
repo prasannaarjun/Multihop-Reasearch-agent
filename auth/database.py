@@ -42,10 +42,11 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
+    full_name = Column(String(100), nullable=True)  # User's full name
     profile_data = Column(Text, nullable=True)  # JSON string for additional user data
     
-    # Relationship to conversations
-    conversations = relationship("ConversationDB", back_populates="user")
+    # Relationship to conversations - commented out for now due to import issues
+    # conversations = relationship("ConversationDB", back_populates="user")
 
 class UserSession(Base):
     """User session model for tracking active sessions"""

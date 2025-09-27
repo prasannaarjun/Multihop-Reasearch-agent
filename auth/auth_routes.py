@@ -5,7 +5,8 @@ Authentication API routes
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List
-from .database import get_db
+from datetime import datetime
+from .database import get_db, User
 from .auth_service import AuthService
 from .auth_models import (
     UserCreate, UserLogin, Token, UserResponse, 
@@ -71,11 +72,18 @@ async def login_user(
 
 @auth_router.post("/refresh", response_model=Token)
 async def refresh_token(
-    refresh_token: str,
+    request: dict,
     db: Session = Depends(get_db)
 ):
     """Refresh access token using refresh token"""
     auth_service = AuthService(db)
+    
+    refresh_token = request.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="refresh_token is required"
+        )
     
     token = auth_service.refresh_access_token(refresh_token)
     if not token:
@@ -88,11 +96,18 @@ async def refresh_token(
 
 @auth_router.post("/logout")
 async def logout_user(
-    refresh_token: str,
+    request: dict,
     db: Session = Depends(get_db)
 ):
     """Logout user by invalidating refresh token"""
     auth_service = AuthService(db)
+    
+    refresh_token = request.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="refresh_token is required"
+        )
     
     success = auth_service.logout_user(refresh_token)
     if not success:
@@ -218,7 +233,7 @@ async def list_users(
 ):
     """List all users (admin only)"""
     auth_service = AuthService(db)
-    users = db.query(auth_service.db.query(User).all())
+    users = db.query(User).all()
     
     return [UserResponse.from_orm(user) for user in users]
 

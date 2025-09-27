@@ -3,10 +3,10 @@ Authentication service with JWT handling and user management
 """
 
 import os
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from .database import User, UserSession
@@ -18,8 +18,8 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing - using bcrypt directly
+BCRYPT_ROUNDS = 12
 
 class AuthService:
     """Authentication service class"""
@@ -29,11 +29,21 @@ class AuthService:
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        # Ensure password is not longer than 72 bytes (bcrypt limit)
+        if len(plain_password.encode('utf-8')) > 72:
+            plain_password = plain_password[:72]
+        try:
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        except Exception:
+            return False
     
     def get_password_hash(self, password: str) -> str:
         """Hash a password"""
-        return pwd_context.hash(password)
+        # Ensure password is not longer than 72 bytes (bcrypt limit)
+        if len(password.encode('utf-8')) > 72:
+            password = password[:72]
+        salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
     
     def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
         """Create a JWT access token"""
@@ -96,7 +106,8 @@ class AuthService:
         db_user = User(
             username=user_data.username.lower(),
             email=user_data.email.lower(),
-            hashed_password=hashed_password
+            hashed_password=hashed_password,
+            full_name=user_data.full_name
         )
         
         self.db.add(db_user)

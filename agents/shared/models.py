@@ -212,7 +212,7 @@ class ConversationDB(Base):
     messages = relationship("ChatMessageDB", back_populates="conversation", cascade="all, delete-orphan")
     
     # Relationship to user
-    user = relationship("User", back_populates="conversations")
+    user = relationship("User")
 
 
 class ChatMessageDB(Base):

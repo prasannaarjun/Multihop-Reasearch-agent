@@ -99,7 +99,16 @@ def get_current_active_user(
     db: Session = Depends(get_db)
 ) -> TokenData:
     """Dependency to get current active user"""
-    return AuthMiddleware.get_current_active_user(current_user, db)
+    auth_service = AuthService(db)
+    user = auth_service.get_user_by_id(current_user.user_id)
+    
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user"
+        )
+    
+    return current_user
 
 def get_current_admin_user(
     current_user: TokenData = Depends(get_current_active_user)
