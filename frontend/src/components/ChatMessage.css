@@ -22,7 +22,7 @@
   align-items: center;
   margin-bottom: 8px;
   font-size: 0.85em;
-  color: #666;
+  color: #ccc;
 }
 
 .message-role {
@@ -31,7 +31,8 @@
 
 .message-time {
   font-size: 0.8em;
-  opacity: 0.7;
+  opacity: 0.8;
+  color: #aaa;
 }
 
 .message-content {
@@ -43,14 +44,14 @@
 }
 
 .message.user .message-content {
-  background: #667eea;
+  background: #303030;
   color: white;
 }
 
 .message.assistant .message-content {
-  background: #f8f9fa;
-  color: #333;
-  border: 1px solid #e1e8ed;
+  background: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #404040;
 }
 
 .message-text {
@@ -147,7 +148,7 @@
   top: 12px;
   width: 0;
   height: 0;
-  border-left: 8px solid #667eea;
+  border-left: 8px solid #303030;
   border-top: 8px solid transparent;
   border-bottom: 8px solid transparent;
 }
@@ -159,7 +160,7 @@
   top: 12px;
   width: 0;
   height: 0;
-  border-right: 8px solid #f8f9fa;
+  border-right: 8px solid #2d2d2d;
   border-top: 8px solid transparent;
   border-bottom: 8px solid transparent;
 }

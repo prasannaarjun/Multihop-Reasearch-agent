@@ -33,9 +33,11 @@ const CollectionStats = ({ refreshTrigger }) => {
     return (
       <div className="collection-stats">
         <h3>Document Collection</h3>
-        <div className="loading-stats">
-          <div className="spinner"></div>
-          <p>Loading statistics...</p>
+        <div className="stats-content">
+          <div className="loading-stats">
+            <div className="spinner"></div>
+            <p>Loading statistics...</p>
+          </div>
         </div>
       </div>
     );
@@ -45,11 +47,13 @@ const CollectionStats = ({ refreshTrigger }) => {
     return (
       <div className="collection-stats">
         <h3>Document Collection</h3>
-        <div className="error-stats">
-          <p>Error loading statistics: {error}</p>
-          <button onClick={fetchStats} className="retry-btn">
-            Retry
-          </button>
+        <div className="stats-content">
+          <div className="error-stats">
+            <p>Error loading statistics: {error}</p>
+            <button onClick={fetchStats} className="retry-btn">
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -63,31 +67,33 @@ const CollectionStats = ({ refreshTrigger }) => {
     <div className="collection-stats">
       <h3>Document Collection</h3>
       
-      <div className="stats-grid">
-        <div className="stat-item">
-          <div className="stat-number">{stats.total_documents}</div>
-          <div className="stat-label">Total Documents</div>
-        </div>
-        
-        <div className="stat-item">
-          <div className="stat-number">{stats.unique_files}</div>
-          <div className="stat-label">Unique Files</div>
-        </div>
-      </div>
-
-      {stats.file_types && Object.keys(stats.file_types).length > 0 && (
-        <div className="file-types-section">
-          <h4>File Types</h4>
-          <div className="file-types-list">
-            {Object.entries(stats.file_types).map(([type, count]) => (
-              <div key={type} className="file-type-item">
-                <span className="file-type-name">{formatFileType(type)}</span>
-                <span className="file-type-count">{count}</span>
-              </div>
-            ))}
+      <div className="stats-content">
+        <div className="stats-grid">
+          <div className="stat-item">
+            <div className="stat-number">{stats.total_documents}</div>
+            <div className="stat-label">Total Documents</div>
+          </div>
+          
+          <div className="stat-item">
+            <div className="stat-number">{stats.unique_files}</div>
+            <div className="stat-label">Unique Files</div>
           </div>
         </div>
-      )}
+
+        {stats.file_types && Object.keys(stats.file_types).length > 0 && (
+          <div className="file-types-section">
+            <h4>File Types</h4>
+            <div className="file-types-list">
+              {Object.entries(stats.file_types).map(([type, count]) => (
+                <div key={type} className="file-type-item">
+                  <span className="file-type-name">{formatFileType(type)}</span>
+                  <span className="file-type-count">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="refresh-section">
         <button onClick={fetchStats} className="refresh-btn">

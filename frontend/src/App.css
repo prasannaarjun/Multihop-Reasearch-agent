@@ -1,20 +1,54 @@
 /* App container */
 .app {
   min-height: 100vh;
+  background: #212121;
+  overflow-x: hidden;
 }
 
 .container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  background: white;
+  width: 100%;
   min-height: 100vh;
-  box-shadow: 0 0 20px rgba(0,0,0,0.1);
+  margin: 0;
+  padding: 20px;
+  background: #212121;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 /* Main content */
 main {
   margin-bottom: 40px;
+}
+
+/* Upload and stats horizontal layout */
+.upload-stats-container {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+  align-items: stretch;
+  min-height: 220px;
+}
+
+.upload-stats-container .collection-stats {
+  flex: 1;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.upload-stats-container .file-upload-container {
+  flex: 1;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Responsive design for mobile */
+@media (max-width: 768px) {
+  .upload-stats-container {
+    flex-direction: column;
+    gap: 15px;
+  }
 }
 
 /* Success message */
@@ -69,8 +103,8 @@ footer {
   text-align: center;
   margin-top: 40px;
   padding-top: 20px;
-  border-top: 1px solid #e1e8ed;
-  color: #7f8c8d;
+  border-top: 1px solid #404040;
+  color: #ccc;
 }
 
 /* Responsive design */

@@ -131,13 +131,15 @@ function AppContent() {
         <Header onToggleMode={toggleMode} isResearchMode={isResearchMode} />
         
         <main>
-          <CollectionStats refreshTrigger={refreshStats} />
-          
-          <FileUpload 
-            onUploadSuccess={handleUploadSuccess}
-            onUploadError={handleUploadError}
-            disabled={!agentStatus?.agent_initialized}
-          />
+          <div className="upload-stats-container">
+            <CollectionStats refreshTrigger={refreshStats} />
+            
+            <FileUpload 
+              onUploadSuccess={handleUploadSuccess}
+              onUploadError={handleUploadError}
+              disabled={!agentStatus?.agent_initialized}
+            />
+          </div>
 
           {uploadSuccess && (
             <div className="success-message">

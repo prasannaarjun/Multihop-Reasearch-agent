@@ -1,80 +1,91 @@
 /* File upload styles */
 .file-upload-container {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+  background: #2d2d2d;
+  padding: 12px;
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
 }
 
 .file-upload-container h3 {
-  color: #2c3e50;
-  margin-bottom: 10px;
-  font-size: 1.3em;
+  color: #ffffff;
+  margin-bottom: 6px;
+  font-size: 1em;
 }
 
-.upload-description {
-  color: #666;
-  margin-bottom: 20px;
-  font-size: 0.95em;
+.upload-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
 }
 
 .file-drop-zone {
-  border: 2px dashed #ddd;
-  border-radius: 10px;
-  padding: 40px 20px;
+  border: 2px dashed #404040;
+  border-radius: 6px;
+  padding: 12px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: #fafafa;
-  min-height: 150px;
+  background: #3d3d3d;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  max-width: 250px;
+  height: 140px;
 }
 
 .file-drop-zone:hover:not(.disabled) {
-  border-color: #667eea;
-  background: #f8f9ff;
+  border-color: #3d5c7a;
+  background: #3d3d3d;
 }
 
 .file-drop-zone.dragging {
-  border-color: #667eea;
-  background: #f0f4ff;
+  border-color: #3d5c7a;
+  background: #404040;
   transform: scale(1.02);
 }
 
 .file-drop-zone.disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: #f5f5f5;
+  background: #1a1a1a;
 }
 
 .drop-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
 }
 
 .upload-icon {
-  font-size: 3em;
-  margin-bottom: 10px;
+  font-size: 1.8em;
+  margin-bottom: 4px;
   opacity: 0.7;
 }
 
 .drop-text {
-  font-size: 1.2em;
-  color: #333;
+  font-size: 0.9em;
+  color: #ffffff;
   margin: 0;
   font-weight: 500;
 }
 
 .file-types {
-  color: #666;
-  font-size: 0.9em;
-  margin: 5px 0;
+  color: #ccc;
+  font-size: 0.7em;
+  margin: 1px 0;
 }
 
 .file-size {
-  color: #999;
-  font-size: 0.8em;
+  color: #aaa;
+  font-size: 0.65em;
   margin: 0;
 }
 
@@ -103,7 +114,7 @@
 }
 
 .upload-progress p {
-  color: #666;
+  color: #ccc;
   margin: 0;
   font-size: 0.95em;
 }

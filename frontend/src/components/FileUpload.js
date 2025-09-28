@@ -109,49 +109,48 @@ const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
   return (
     <div className="file-upload-container">
       <h3>Upload Documents</h3>
-      <p className="upload-description">
-        Upload PDF, LaTeX, or text files to add them to your research database.
-      </p>
       
-      <div
-        className={`file-drop-zone ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        onClick={openFileDialog}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={supportedTypes.join(',')}
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-          disabled={disabled}
-        />
-        
-        {isUploading ? (
-          <div className="upload-progress">
-            <div className="progress-bar">
-              <div 
-                className="progress-fill" 
-                style={{ width: `${uploadProgress}%` }}
-              ></div>
+      <div className="upload-content">
+        <div
+          className={`file-drop-zone ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onClick={openFileDialog}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={supportedTypes.join(',')}
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+            disabled={disabled}
+          />
+          
+          {isUploading ? (
+            <div className="upload-progress">
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+              <p>Processing file...</p>
             </div>
-            <p>Processing file...</p>
-          </div>
-        ) : (
-          <div className="drop-content">
-            <div className="upload-icon">📁</div>
-            <p className="drop-text">
-              {isDragging ? 'Drop file here' : 'Click or drag file here'}
-            </p>
-            <p className="file-types">
-              Supported: {supportedTypes.join(', ')}
-            </p>
-            <p className="file-size">Max size: 50MB</p>
-          </div>
-        )}
+          ) : (
+            <div className="drop-content">
+              <div className="upload-icon">📁</div>
+              <p className="drop-text">
+                {isDragging ? 'Drop file here' : 'Click or drag file here'}
+              </p>
+              <p className="file-types">
+                Supported: {supportedTypes.join(', ')}
+              </p>
+              <p className="file-size">Max size: 50MB</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

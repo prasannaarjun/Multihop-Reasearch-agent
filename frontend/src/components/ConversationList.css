@@ -11,7 +11,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: #ccc;
   text-align: center;
   padding: 20px;
 }
@@ -29,7 +29,7 @@
 
 .empty-conversations p:last-child {
   font-size: 0.8em;
-  color: #999;
+  color: #aaa;
 }
 
 .conversation-item {
@@ -40,21 +40,21 @@
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: white;
+  background: #2d2d2d;
   border: 1px solid transparent;
 }
 
 .conversation-item:hover {
-  background: #f8f9fa;
-  border-color: #e1e8ed;
+  background: #3d3d3d;
+  border-color: #404040;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
 .conversation-item.active {
-  background: #e3f2fd;
-  border-color: #2196f3;
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+  background: #3d5c7a;
+  border-color: #3d5c7a;
+  box-shadow: 0 2px 8px rgba(61, 92, 122, 0.3);
 }
 
 .conversation-content {
@@ -64,7 +64,7 @@
 
 .conversation-title {
   font-weight: 600;
-  color: #2c3e50;
+  color: #ffffff;
   margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -74,12 +74,13 @@
 
 .conversation-title-input {
   width: 100%;
-  border: 2px solid #667eea;
+  border: 2px solid #3d5c7a;
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 0.95em;
   font-weight: 600;
-  background: white;
+  background: #2d2d2d;
+  color: #ffffff;
   outline: none;
 }
 
@@ -88,7 +89,7 @@
   justify-content: space-between;
   align-items: center;
   font-size: 0.8em;
-  color: #666;
+  color: #ccc;
 }
 
 .message-count {

@@ -218,6 +218,9 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
       </div>
 
       <div className="chat-main">
+        <div className="chat-main-header">
+          <h3>💬 Chat</h3>
+        </div>
         <div className="chat-messages">
           {messages.length === 0 ? (
             <div className="empty-chat">

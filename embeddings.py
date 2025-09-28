@@ -5,8 +5,6 @@ from tempfile import TemporaryDirectory
 from typing import List, Dict, Any, Optional
 
 import chromadb
-import numpy as np
-from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from document_processing import process_file, SUPPORTED_EXTENSIONS, DocumentProcessingError
