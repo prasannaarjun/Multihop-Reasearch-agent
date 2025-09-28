@@ -169,10 +169,35 @@ class ApiService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${apiBase}/upload`, {
+    const config = {
       method: 'POST',
       body: formData,
-    });
+      headers: {},
+    };
+
+    if (this.token) {
+      config.headers.Authorization = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(`${apiBase}/upload`, config);
+
+    if (response.status === 401 && this.refreshToken) {
+      try {
+        await this.refreshAccessToken();
+        config.headers.Authorization = `Bearer ${this.token}`;
+        const retryResponse = await fetch(`${apiBase}/upload`, config);
+
+        if (!retryResponse.ok) {
+          const retryError = await retryResponse.json().catch(() => ({}));
+          throw new Error(retryError.detail || 'Upload failed');
+        }
+
+        return await retryResponse.json();
+      } catch (error) {
+        this.clearTokens();
+        throw new Error('Session expired. Please log in again.');
+      }
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -191,15 +216,14 @@ class ApiService {
   }
 
   // Chat API methods
-  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true, selectedText = null) {
+  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true) {
     const response = await this.request('/chat', {
       method: 'POST',
       body: JSON.stringify({
         message,
         conversation_id: conversationId,
         per_sub_k: perSubK,
-        include_context: includeContext,
-        selected_text: selectedText
+        include_context: includeContext
       }),
     });
     
@@ -216,7 +240,6 @@ class ApiService {
       error: response.error
     };
   }
-
 
   async getConversations() {
     const conversations = await this.request('/conversations');

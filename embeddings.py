@@ -1,11 +1,15 @@
 import os
 import glob
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import List, Dict, Any, Optional
-from sentence_transformers import SentenceTransformer
+
 import chromadb
-from chromadb.config import Settings
 import numpy as np
-from file_processor import file_processor
+from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
+
+from document_processing import process_file, SUPPORTED_EXTENSIONS, DocumentProcessingError
 
 
 def build_index(data_dir: str, persist_directory: str = "chroma_db") -> None:
@@ -29,14 +33,14 @@ def build_index(data_dir: str, persist_directory: str = "chroma_db") -> None:
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
     # Get all supported files
-    supported_files = []
-    for ext in file_processor.supported_extensions:
+    supported_files: List[str] = []
+    for ext in SUPPORTED_EXTENSIONS:
         pattern = os.path.join(data_dir, f"*{ext}")
         supported_files.extend(glob.glob(pattern))
     
     if not supported_files:
         print(f"No supported files found in {data_dir}")
-        print(f"Supported extensions: {file_processor.supported_extensions}")
+        print(f"Supported extensions: {sorted(SUPPORTED_EXTENSIONS)}")
         return
     
     print(f"Found {len(supported_files)} supported files")
@@ -48,12 +52,10 @@ def build_index(data_dir: str, persist_directory: str = "chroma_db") -> None:
     
     for i, file_path in enumerate(supported_files):
         try:
-            # Use file processor to extract text
-            file_data = file_processor.process_file(file_path)
-            content = file_data['text']
-            filename = file_data['filename']
-            title = file_data['title']
-            file_type = file_data['file_type']
+            content = process_file(file_path)
+            filename = os.path.basename(file_path)
+            title = Path(filename).stem.replace('_', ' ').replace('-', ' ').title()
+            file_type = Path(filename).suffix.lower()
             
             if not content:
                 continue
@@ -86,7 +88,7 @@ def build_index(data_dir: str, persist_directory: str = "chroma_db") -> None:
                 })
                 ids.append(filename)
                 
-        except Exception as e:
+        except (DocumentProcessingError, Exception) as e:
             print(f"Error processing {file_path}: {e}")
             continue
     
@@ -183,6 +185,55 @@ def query_index(collection, model, text: str, top_k: int = 3) -> List[Dict[str, 
     return formatted_results
 
 
+def clear_index(persist_directory: str = "chroma_db") -> None:
+    """
+    Clear all vectors from the Chroma index.
+    
+    Args:
+        persist_directory: Directory containing Chroma database
+    """
+    # Initialize Chroma client
+    client = chromadb.PersistentClient(path=persist_directory)
+    
+    try:
+        # Get the collection
+        collection = client.get_collection("research_documents")
+        
+        # Get all document IDs in the collection
+        all_docs = collection.get()
+        if all_docs['ids']:
+            print(f"Found {len(all_docs['ids'])} documents to delete")
+            
+            # Delete all documents
+            collection.delete(ids=all_docs['ids'])
+            print("All vectors have been deleted from ChromaDB")
+        else:
+            print("No documents found in the collection")
+            
+    except Exception as e:
+        print(f"Error clearing index: {e}")
+        print("Collection may not exist or may already be empty")
+
+
+def delete_collection(persist_directory: str = "chroma_db") -> None:
+    """
+    Completely delete the Chroma collection.
+    
+    Args:
+        persist_directory: Directory containing Chroma database
+    """
+    # Initialize Chroma client
+    client = chromadb.PersistentClient(path=persist_directory)
+    
+    try:
+        # Delete the collection
+        client.delete_collection("research_documents")
+        print("Collection 'research_documents' has been completely deleted")
+    except Exception as e:
+        print(f"Error deleting collection: {e}")
+        print("Collection may not exist")
+
+
 def add_file_to_index(file_content: bytes, filename: str, persist_directory: str = "chroma_db") -> Dict[str, Any]:
     """
     Add a single uploaded file to the existing Chroma index.
@@ -209,11 +260,14 @@ def add_file_to_index(file_content: bytes, filename: str, persist_directory: str
     
     # Process the uploaded file
     try:
-        file_data = file_processor.process_uploaded_file(file_content, filename)
-        content = file_data['text']
-        title = file_data['title']
-        file_type = file_data['file_type']
-        word_count = file_data['word_count']
+        with TemporaryDirectory() as tmp_dir:
+            temp_path = Path(tmp_dir) / filename
+            temp_path.write_bytes(file_content)
+
+            content = process_file(str(temp_path))
+            title = temp_path.stem.replace('_', ' ').replace('-', ' ').title()
+            file_type = temp_path.suffix.lower()
+            word_count = len(content.split())
         
         # Split content into chunks if too long
         max_chunk_size = 10000
@@ -268,7 +322,7 @@ def add_file_to_index(file_content: bytes, filename: str, persist_directory: str
             "message": f"Successfully added {filename} to the index"
         }
         
-    except Exception as e:
+    except (DocumentProcessingError, Exception) as e:
         return {
             "success": False,
             "filename": filename,

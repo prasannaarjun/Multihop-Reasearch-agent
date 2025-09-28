@@ -1,0 +1,9 @@
+This is a sample document for testing the multi-hop research agent.
+
+Key topics covered:
+- Machine Learning
+- Natural Language Processing
+- Vector Databases
+- Document Processing
+
+This document contains information about various AI technologies and their applications in research and development.

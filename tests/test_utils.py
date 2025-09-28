@@ -6,60 +6,7 @@ import pytest
 import os
 import tempfile
 from pathlib import Path
-from file_processor import file_processor
 from embeddings import add_file_to_index, get_collection_stats
-
-
-class TestFileProcessor:
-    """Test file processing functionality."""
-    
-    def test_file_processor_init(self):
-        """Test file processor initialization."""
-        assert file_processor is not None
-        assert hasattr(file_processor, 'supported_extensions')
-        assert hasattr(file_processor, 'process_file')
-    
-    def test_supported_extensions(self):
-        """Test supported file extensions."""
-        extensions = file_processor.supported_extensions
-        assert isinstance(extensions, list)
-        assert len(extensions) > 0
-        # Check for common text file extensions
-        assert any(ext in extensions for ext in ['.txt', '.md', '.py', '.json'])
-    
-    def test_process_text_file(self, temp_dir):
-        """Test processing a text file."""
-        # Create a temporary text file
-        test_file = Path(temp_dir) / "test.txt"
-        test_content = "This is a test document about machine learning and artificial intelligence."
-        test_file.write_text(test_content)
-        
-        try:
-            result = file_processor.process_file(str(test_file))
-            
-            assert isinstance(result, dict)
-            assert result['filename'] == 'test.txt'
-            assert result['file_type'] == 'txt'
-            assert 'machine learning' in result['text'].lower()
-            assert 'artificial intelligence' in result['text'].lower()
-            assert result['word_count'] > 0
-        except Exception as e:
-            # If file processing fails due to missing dependencies, that's okay for tests
-            pytest.skip(f"File processing failed: {e}")
-    
-    def test_process_unsupported_file(self, temp_dir):
-        """Test processing an unsupported file type."""
-        # Create a temporary file with unsupported extension
-        test_file = Path(temp_dir) / "test.xyz"
-        test_file.write_text("Test content")
-        
-        try:
-            result = file_processor.process_file(str(test_file))
-            # Should either process it or raise an appropriate error
-            assert isinstance(result, dict) or isinstance(result, Exception)
-        except Exception as e:
-            # Expected for unsupported file types
-            assert "unsupported" in str(e).lower() or "not supported" in str(e).lower()
 
 
 class TestEmbeddings:
@@ -91,7 +38,7 @@ class TestEmbeddings:
         test_file.write_text(test_content)
         
         try:
-            result = add_file_to_index(str(test_file))
+            result = add_file_to_index(test_file.read_bytes(), test_file.name)
             
             if "error" in result:
                 # If there's an error (e.g., no collection exists), that's okay for tests

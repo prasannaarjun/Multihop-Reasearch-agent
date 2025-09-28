@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 import os
 import warnings
 import logging
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # Suppress bcrypt version warning
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
@@ -27,7 +29,7 @@ from agents.shared.exceptions import AgentError
 # Import existing utilities
 from report import generate_markdown_report, save_report
 from embeddings import add_file_to_index, get_collection_stats, load_index
-from file_processor import file_processor
+from document_processing import process_file, SUPPORTED_EXTENSIONS, DocumentProcessingError
 from ollama_client import OllamaClient
 
 # Authentication imports
@@ -338,55 +340,55 @@ async def upload_file(
             detail="Research agent not initialized"
         )
     
-    # Check if file type is supported
-    if not file_processor.is_supported(file.filename):
+    if Path(file.filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type. Supported types: {list(file_processor.supported_extensions)}"
+            detail=f"Unsupported file type. Supported types: {sorted(SUPPORTED_EXTENSIONS)}"
         )
-    
+
     try:
-        # Read file content
         file_content = await file.read()
-        
-        if len(file_content) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Empty file uploaded"
-            )
-        
-        # Check file size (limit to 50MB)
-        max_size = 50 * 1024 * 1024  # 50MB
+        if not file_content:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+        max_size = 50 * 1024 * 1024
         if len(file_content) > max_size:
             raise HTTPException(
                 status_code=400,
                 detail="File too large. Maximum size is 50MB."
             )
-        
-        # Add file to index
-        result = add_file_to_index(file_content, file.filename)
-        
+
+        with TemporaryDirectory() as tmp_dir:
+            temp_file = Path(tmp_dir) / file.filename
+            temp_file.write_bytes(file_content)
+
+            extracted_text = process_file(str(temp_file))
+            word_count = len(extracted_text.split())
+
+            result = add_file_to_index(file_content, file.filename)
+            if result.get("success"):
+                result.setdefault("word_count", word_count)
+
         if result["success"]:
             return FileUploadResponse(
                 success=True,
-                filename=result["filename"],
+                filename=file.filename,
                 message=result["message"],
-                file_type=result["file_type"],
-                word_count=result["word_count"],
+                file_type=Path(file.filename).suffix.lower(),
+                word_count=result.get("word_count", word_count),
                 chunks_added=result["chunks_added"]
             )
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=result["message"]
-            )
-            
+            raise HTTPException(status_code=400, detail=result["message"])
+
+    except DocumentProcessingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing file: {str(e)}"
+            detail=f"Error processing file: {str(exc)}"
         )
 
 @app.get("/collection-stats", response_model=CollectionStatsResponse)
@@ -430,7 +432,7 @@ async def get_supported_file_types():
         List of supported file extensions
     """
     return {
-        "supported_extensions": list(file_processor.supported_extensions),
+        "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         "max_file_size_mb": 50
     }
 

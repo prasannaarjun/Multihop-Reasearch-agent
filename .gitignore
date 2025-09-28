@@ -404,3 +404,5 @@ alembic.ini
 .pytest_cache/
 
 .cursor/
+
+.idea/
