@@ -5,9 +5,12 @@ import ConversationList from './ConversationList';
 import FileUpload from './FileUpload';
 import HighlightListener from './HighlightListener';
 import AskModelModal from './AskModelModal';
+import UserProfile from './UserProfile';
+import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 
 const ChatInterface = ({ onToggleMode, isResearchMode }) => {
+  const { logout } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -18,6 +21,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [askModelModalOpen, setAskModelModalOpen] = useState(false);
   const [askModelHighlight, setAskModelHighlight] = useState('');
+  const [showUserProfile, setShowUserProfile] = useState(false);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -194,6 +198,14 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     setAskModelModalOpen(false);
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (err) {
+      setError('Failed to logout');
+    }
+  };
+
   return (
     <div className="chat-interface">
       <HighlightListener onHighlight={handleHighlight} />
@@ -220,6 +232,22 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
       <div className="chat-main">
         <div className="chat-main-header">
           <h3>💬 Chat</h3>
+          <div className="chat-header-actions">
+            <button
+              className="profile-btn"
+              onClick={() => setShowUserProfile(true)}
+              title="User Profile"
+            >
+              👤 Profile
+            </button>
+            <button
+              className="logout-btn"
+              onClick={handleLogout}
+              title="Logout"
+            >
+              🚪 Logout
+            </button>
+          </div>
         </div>
         <div className="chat-messages">
           {messages.length === 0 ? (
@@ -274,23 +302,19 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
         {showFileUpload && (
           <div className="file-upload-modal">
             <div className="file-upload-overlay" onClick={() => setShowFileUpload(false)}></div>
-            <div className="file-upload-content">
-              <div className="file-upload-header">
-                <h3>Upload Documents</h3>
-                <button 
-                  className="close-btn"
-                  onClick={() => setShowFileUpload(false)}
-                  title="Close"
-                >
-                  ✕
-                </button>
-              </div>
-              <FileUpload 
-                onUploadSuccess={handleUploadSuccess}
-                onUploadError={handleUploadError}
-                disabled={false}
-              />
-            </div>
+            <h3>Upload Documents</h3>
+            <button 
+              className="close-btn"
+              onClick={() => setShowFileUpload(false)}
+              title="Close"
+            >
+              ✕
+            </button>
+            <FileUpload 
+              onUploadSuccess={handleUploadSuccess}
+              onUploadError={handleUploadError}
+              disabled={false}
+            />
           </div>
         )}
 
@@ -355,6 +379,9 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
           initialHighlight={askModelHighlight}
           onResponse={handleAskModelResponse}
         />
+        {showUserProfile && (
+          <UserProfile onClose={() => setShowUserProfile(false)} />
+        )}
       </div>
     </div>
   );

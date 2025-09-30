@@ -61,8 +61,8 @@ async def lifespan(app: FastAPI):
         print("Database tables created successfully")
         
         # Get configuration from environment variables
-        use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
-        ollama_model = os.getenv("OLLAMA_MODEL", "mistral:latest")
+        use_ollama = os.getenv("USE_OLLAMA").lower() == "true"
+        ollama_model = os.getenv("OLLAMA_MODEL")
         
         # Load Chroma index
         collection, model = load_index("chroma_db")

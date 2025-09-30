@@ -112,6 +112,51 @@
   line-height: 1.2;
 }
 
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.logout-btn,
+.profile-btn {
+  background: #404040;
+  color: #ffffff;
+  border: 1px solid #555555;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.logout-btn:hover,
+.profile-btn:hover {
+  background: #555555;
+  border-color: #666666;
+  transform: translateY(-1px);
+}
+
+.logout-btn:active,
+.profile-btn:active {
+  transform: translateY(0);
+  background: #333333;
+}
+
+.logout-btn {
+  background: #dc3545;
+  border-color: #c82333;
+}
+
+.logout-btn:hover {
+  background: #c82333;
+  border-color: #bd2130;
+}
+
 .new-conversation-btn {
   background: #667eea;
   color: white;
