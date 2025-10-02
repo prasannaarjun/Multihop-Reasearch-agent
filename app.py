@@ -15,6 +15,7 @@ import warnings
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from io import BytesIO
 
 # Suppress bcrypt version warning
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
@@ -415,10 +416,10 @@ async def upload_file(
     current_user: TokenData = Depends(get_current_active_user)
 ):
     """
-    Upload a file (PDF, LaTeX, or text) and add it to the research database.
+    Upload a file (PDF, DOCX, or text) and add it to the research database.
     
     Args:
-        file: Uploaded file
+        file: Uploaded file (PDF, DOCX, or text)
         
     Returns:
         Upload result with processing information
@@ -429,7 +430,8 @@ async def upload_file(
             detail="Research agent not initialized"
         )
     
-    if Path(file.filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
+    file_extension = Path(file.filename).suffix.lower()
+    if file_extension not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type. Supported types: {sorted(SUPPORTED_EXTENSIONS)}"
@@ -447,6 +449,7 @@ async def upload_file(
                 detail="File too large. Maximum size is 50MB."
             )
 
+
         with TemporaryDirectory() as tmp_dir:
             temp_file = Path(tmp_dir) / file.filename
             temp_file.write_bytes(file_content)
@@ -463,7 +466,7 @@ async def upload_file(
                 success=True,
                 filename=file.filename,
                 message=result["message"],
-                file_type=Path(file.filename).suffix.lower(),
+                file_type=file_extension,
                 word_count=result.get("word_count", word_count),
                 chunks_added=result["chunks_added"]
             )

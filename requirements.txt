@@ -11,9 +11,7 @@ requests
 ollama
 PyPDF2
 pypdf
-python-latex
 docling
-pylatexenc
 # Authentication dependencies
 python-jose[cryptography]
 passlib[bcrypt]

@@ -37,7 +37,8 @@
   justify-content: center;
   width: 100%;
   max-width: 250px;
-  height: 140px;
+  min-height: 140px;
+  height: auto;
 }
 
 .file-drop-zone:hover:not(.disabled) {
@@ -62,6 +63,8 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  padding: 8px;
+  width: 100%;
 }
 
 .upload-icon {
@@ -87,6 +90,17 @@
   color: #aaa;
   font-size: 0.65em;
   margin: 0;
+}
+
+.zip-info {
+  color: #4a9eff;
+  font-size: 0.65em;
+  margin: 2px 0 0 0;
+  font-style: italic;
+  text-align: center;
+  word-wrap: break-word;
+  max-width: 100%;
+  line-height: 1.2;
 }
 
 .upload-progress {

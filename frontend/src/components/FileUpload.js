@@ -79,6 +79,7 @@ const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
       return;
     }
 
+
     setIsUploading(true);
     setUploadProgress(0);
 
@@ -96,6 +97,7 @@ const FileUpload = ({ onUploadSuccess, onUploadError, disabled }) => {
     } catch (error) {
       setIsUploading(false);
       setUploadProgress(0);
+      
       onUploadError(error.message || 'Upload failed');
     }
   };
