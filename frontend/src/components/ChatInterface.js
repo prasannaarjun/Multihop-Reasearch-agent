@@ -6,6 +6,7 @@ import FileUpload from './FileUpload';
 import HighlightListener from './HighlightListener';
 import AskModelModal from './AskModelModal';
 import UserProfile from './UserProfile';
+import ModelSelector from './ModelSelector';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 
@@ -22,6 +23,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   const [askModelModalOpen, setAskModelModalOpen] = useState(false);
   const [askModelHighlight, setAskModelHighlight] = useState('');
   const [showUserProfile, setShowUserProfile] = useState(false);
+  const [currentModel, setCurrentModel] = useState('');
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -198,6 +200,13 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     setAskModelModalOpen(false);
   };
 
+  const handleModelChange = (newModel) => {
+    setCurrentModel(newModel);
+    // Show a success notification
+    setError(`Model successfully changed to ${newModel}`);
+    setTimeout(() => setError(null), 3000);
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -338,39 +347,52 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
         )}
 
         <div className="chat-input">
-          <div className="chat-input-actions">
-            <button
-              className="mode-toggle-btn-input"
-              onClick={onToggleMode}
-              title="Switch to Research Mode"
-              disabled={isLoading}
-            >
-              🔍
-            </button>
-            <button
-              className="upload-small-btn"
-              onClick={() => setShowFileUpload(true)}
-              title="Upload Documents"
-              disabled={isLoading}
-            >
-              📁
-            </button>
+          <div className="chat-input-main">
+            <div className="chat-input-left">
+              <div className="chat-input-actions">
+                <button
+                  className="mode-toggle-btn-input"
+                  onClick={onToggleMode}
+                  title="Switch to Research Mode"
+                  disabled={isLoading}
+                >
+                  🔍
+                </button>
+                <button
+                  className="upload-small-btn"
+                  onClick={() => setShowFileUpload(true)}
+                  title="Upload Documents"
+                  disabled={isLoading}
+                >
+                  📁
+                </button>
+              </div>
+              <textarea
+                id="chat-message-input"
+                name="message"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder={askModelHighlight ? "Ask a question about the selected text..." : "Ask a question or start a conversation... (Tip: Upload documents with 📁 button)"}
+                disabled={isLoading}
+                rows="3"
+              />
+            </div>
+            <div className="chat-input-right">
+              <ModelSelector
+                currentModel={currentModel}
+                onModelChange={handleModelChange}
+                disabled={isLoading}
+              />
+              <button
+                onClick={() => sendMessage(askModelHighlight)}
+                disabled={!inputMessage.trim() || isLoading}
+                className="send-btn"
+              >
+                Send
+              </button>
+            </div>
           </div>
-          <textarea
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={askModelHighlight ? "Ask a question about the selected text..." : "Ask a question or start a conversation... (Tip: Upload documents with 📁 button)"}
-            disabled={isLoading}
-            rows="3"
-          />
-          <button
-            onClick={() => sendMessage(askModelHighlight)}
-            disabled={!inputMessage.trim() || isLoading}
-            className="send-btn"
-          >
-            Send
-          </button>
         </div>
         <AskModelModal
           isOpen={askModelModalOpen}

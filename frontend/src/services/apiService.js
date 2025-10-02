@@ -410,6 +410,18 @@ class ApiService {
     });
   }
 
+  // Model management methods
+  async getAvailableModels() {
+    return this.request('/models');
+  }
+
+  async changeModel(modelName) {
+    return this.request('/models/change', {
+      method: 'POST',
+      body: JSON.stringify({ model_name: modelName }),
+    });
+  }
+
   // Check if user is authenticated
   isAuthenticated() {
     return !!this.token;

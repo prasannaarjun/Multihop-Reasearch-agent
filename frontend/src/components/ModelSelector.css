@@ -1,0 +1,81 @@
+/* Model Selector Styles - Simple Dropdown */
+.model-selector {
+  position: relative;
+  display: inline-block;
+  min-width: 120px;
+  width: 100%;
+}
+
+.model-selector-disabled {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #404040;
+  border: 1px solid #555555;
+  border-radius: 6px;
+  color: #888;
+  font-size: 0.85em;
+  height: 40px;
+}
+
+.model-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: #404040;
+  border: 1px solid #555555;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+  padding-right: 28px;
+  height: 40px;
+}
+
+.model-select:hover:not(:disabled) {
+  background: #555555;
+  border-color: #666666;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.model-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #333333;
+}
+
+.model-select option {
+  background: #404040;
+  color: #ffffff;
+  padding: 8px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .model-selector {
+    min-width: 100px;
+  }
+  
+  .model-select {
+    font-size: 0.8em;
+    padding: 6px 10px;
+    padding-right: 24px;
+    height: 35px;
+  }
+  
+  .model-selector-disabled {
+    font-size: 0.8em;
+    padding: 6px 10px;
+    height: 35px;
+  }
+}

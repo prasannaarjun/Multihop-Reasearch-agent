@@ -38,6 +38,8 @@ from auth.database import create_tables
 
 # Global variables for agents
 research_agent = None
+current_model = None
+available_models = []
 
 def get_conversation_manager_for_user(current_user: TokenData):
     """Get a conversation manager scoped to the current user."""
@@ -49,10 +51,85 @@ def get_conversation_manager_for_user(current_user: TokenData):
         is_admin=current_user.is_admin
     )
 
+def load_available_models():
+    """Load available models from Ollama and store them in memory."""
+    global available_models, current_model
+    
+    try:
+        # Check if Ollama is enabled
+        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+        if not use_ollama:
+            available_models = []
+            current_model = None
+            return
+        
+        # Get Ollama base URL
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        
+        # Make direct request to Ollama /api/tags endpoint
+        import requests
+        try:
+            response = requests.get(f"{ollama_base_url}/api/tags", timeout=10)
+            response.raise_for_status()
+            ollama_data = response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Warning: Could not connect to Ollama at {ollama_base_url}: {e}")
+            # For testing purposes, add some mock models
+            print("Adding mock models for testing...")
+            available_models = [
+                {"name": "llama2:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
+                {"name": "mistral:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
+                {"name": "codellama:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""}
+            ]
+            current_model = available_models[0]['name'] if available_models else None
+            print(f"Mock models set: {available_models}")
+            return
+        
+        # Parse models from Ollama response
+        models = []
+        for model in ollama_data.get('models', []):
+            model_info = {
+                "name": model.get('name', ''),
+                "size": model.get('size', 0),
+                "modified_at": model.get('modified_at', ''),
+                "family": model.get('details', {}).get('family', ''),
+                "format": model.get('details', {}).get('format', ''),
+                "families": model.get('details', {}).get('families', []),
+                "parameter_size": model.get('details', {}).get('parameter_size', ''),
+                "quantization_level": model.get('details', {}).get('quantization_level', '')
+            }
+            models.append(model_info)
+        
+        available_models = models
+        
+        # Set current model to first available model if none is set
+        if not current_model and models:
+            current_model = models[0]['name']
+            print(f"Auto-selected model: {current_model}")
+        
+    except Exception as e:
+        print(f"Error loading models: {e}")
+        available_models = []
+        current_model = None
+
+def set_current_model(model_name: str) -> bool:
+    """Set the current model if it exists in available models."""
+    global current_model
+    
+    if not available_models:
+        return False
+    
+    # Check if model exists
+    model_exists = any(model['name'] == model_name for model in available_models)
+    if model_exists:
+        current_model = model_name
+        return True
+    return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
-    global research_agent
+    global research_agent, current_model, available_models
     
     # Startup
     try:
@@ -60,9 +137,11 @@ async def lifespan(app: FastAPI):
         create_tables()
         print("Database tables created successfully")
         
+        # Load available models from Ollama
+        load_available_models()
+        
         # Get configuration from environment variables
-        use_ollama = os.getenv("USE_OLLAMA").lower() == "true"
-        ollama_model = os.getenv("OLLAMA_MODEL")
+        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
         
         # Load Chroma index
         collection, model = load_index("chroma_db")
@@ -70,21 +149,25 @@ async def lifespan(app: FastAPI):
         # Initialize document retriever
         retriever = DocumentRetriever(collection, model)
         
-        # Initialize LLM client if enabled
+        # Initialize LLM client if enabled and model is available
         llm_client = None
-        if use_ollama:
-            llm_client = OllamaClient(model_name=ollama_model)
+        if use_ollama and current_model:
+            llm_client = OllamaClient(model_name=current_model)
             if not llm_client.is_available():
                 print("Warning: Ollama not available, falling back to rule-based processing")
                 llm_client = None
+        elif use_ollama and not current_model:
+            print("Warning: No models available, falling back to rule-based processing")
         
         # Initialize research agent
-        research_agent = ResearchAgent(retriever, llm_client, use_ollama, ollama_model)
+        research_agent = ResearchAgent(retriever, llm_client, use_ollama, current_model)
         
         # Note: Chat agent is now created per-request with user-scoped conversation manager
         # No global chat agent needed since each request gets its own scoped instance
         
         print("Research agent initialized successfully")
+        if current_model:
+            print(f"Using model: {current_model}")
         print("Starting Multi-hop Research Agent API (Modular Version)...")
     except Exception as e:
         print(f"Failed to initialize agents: {e}")
@@ -94,6 +177,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("Shutting down Multi-hop Research Agent API...")
+    
+    # Clear global variables
+    available_models = []
+    current_model = None
+    research_agent = None
+    print("Global variables cleared.")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -435,6 +524,137 @@ async def get_supported_file_types():
         "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
         "max_file_size_mb": 50
     }
+
+@app.get("/models")
+async def get_available_models():
+    """
+    Get list of available models from Ollama.
+    
+    Returns:
+        List of available models with their details
+    """
+    try:
+        # Check if Ollama is enabled
+        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+        if not use_ollama:
+            return {
+                "models": [],
+                "ollama_enabled": False,
+                "message": "Ollama is not enabled. Set USE_OLLAMA=true to enable model listing."
+            }
+        
+        # Use in-memory models
+        global available_models, current_model
+        
+        # Reload models if none are available
+        if not available_models:
+            load_available_models()
+        
+        return {
+            "models": available_models,
+            "ollama_enabled": True,
+            "ollama_available": len(available_models) > 0,
+            "current_model": current_model,
+            "total_models": len(available_models)
+        }
+        
+    except Exception as e:
+        return {
+            "models": [],
+            "ollama_enabled": True,
+            "ollama_available": False,
+            "error": f"Error listing models: {str(e)}"
+        }
+
+class ModelChangeRequest(BaseModel):
+    model_name: str
+
+@app.post("/models/change")
+async def change_model(request: ModelChangeRequest):
+    """
+    Change the current model for the research agent.
+    
+    Args:
+        request: Model change request with model_name
+        
+    Returns:
+        Success message and new model info
+    """
+    global current_model, research_agent
+    
+    try:
+        # Check if Ollama is enabled
+        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+        if not use_ollama:
+            raise HTTPException(
+                status_code=400,
+                detail="Ollama is not enabled. Set USE_OLLAMA=true to enable model changes."
+            )
+        
+        # Reload models if none are available
+        if not available_models:
+            load_available_models()
+        
+        # Verify the model exists
+        model_exists = any(model['name'] == request.model_name for model in available_models)
+        if not model_exists:
+            available_model_names = [model['name'] for model in available_models]
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model_name}' not found. Available models: {available_model_names}"
+            )
+        
+        # Set the new current model
+        old_model = current_model
+        success = set_current_model(request.model_name)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to set the new model"
+            )
+        
+        # Reinitialize the research agent with the new model
+        try:
+            # Load Chroma index
+            collection, model = load_index("chroma_db")
+            
+            # Initialize document retriever
+            retriever = DocumentRetriever(collection, model)
+            
+            # Initialize LLM client with new model
+            llm_client = None
+            if use_ollama and current_model:
+                llm_client = OllamaClient(model_name=current_model)
+                if not llm_client.is_available():
+                    print("Warning: New model not available, falling back to rule-based processing")
+                    llm_client = None
+            
+            # Reinitialize research agent
+            research_agent = ResearchAgent(retriever, llm_client, use_ollama, current_model)
+            
+        except Exception as e:
+            # Revert to old model if reinitialization fails
+            set_current_model(old_model)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to reinitialize research agent with new model: {str(e)}"
+            )
+        
+        return {
+            "message": f"Model successfully changed to '{request.model_name}'",
+            "new_model": request.model_name,
+            "old_model": old_model,
+            "restart_required": False
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error changing model: {str(e)}"
+        )
 
 # Chat endpoints
 @app.post("/chat", response_model=ChatResponseModel)
