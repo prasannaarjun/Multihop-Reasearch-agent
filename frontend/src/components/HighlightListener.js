@@ -89,14 +89,83 @@ const HighlightListener = ({ onHighlight }) => {
         return;
       }
 
-      let node = event.target;
-      let conversationId = null;
-      while (node) {
-        if (node.dataset?.conversationId) {
-          conversationId = node.dataset.conversationId;
+      // Check if selection is within a chat message
+      const range = selection.getRangeAt(0);
+      const commonAncestor = range.commonAncestorContainer;
+      
+      // Find the chat message element that contains the selection
+      let messageElement = null;
+      let node = commonAncestor.nodeType === Node.TEXT_NODE ? commonAncestor.parentElement : commonAncestor;
+      
+      while (node && node !== document.body) {
+        // Check if this is a chat message element
+        if (node.classList && node.classList.contains('message')) {
+          messageElement = node;
           break;
         }
         node = node.parentElement;
+      }
+
+      // If no message element found, hide button
+      if (!messageElement) {
+        hideButton();
+        selectionRef.current = null;
+        return;
+      }
+
+      // Check if the message has user or assistant role
+      const messageRole = messageElement.classList.contains('user') ? 'user' : 
+                         messageElement.classList.contains('assistant') ? 'assistant' : null;
+      
+      if (!messageRole) {
+        hideButton();
+        selectionRef.current = null;
+        return;
+      }
+
+      // Check if selection is within input, textarea, or contenteditable elements
+      const activeElement = document.activeElement;
+      if (activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.contentEditable === 'true'
+      )) {
+        hideButton();
+        selectionRef.current = null;
+        return;
+      }
+
+      // Check if selection spans multiple messages
+      const startContainer = range.startContainer;
+      const endContainer = range.endContainer;
+      
+      // Find message elements for start and end containers
+      const findMessageElement = (container) => {
+        let node = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+        while (node && node !== document.body) {
+          if (node.classList && node.classList.contains('message')) {
+            return node;
+          }
+          node = node.parentElement;
+        }
+        return null;
+      };
+
+      const startMessage = findMessageElement(startContainer);
+      const endMessage = findMessageElement(endContainer);
+
+      // If selection spans multiple messages, hide button
+      if (startMessage !== endMessage) {
+        hideButton();
+        selectionRef.current = null;
+        return;
+      }
+
+      // Get conversation ID from the message element
+      let conversationId = null;
+      const messageContent = messageElement.querySelector('.message-content');
+      if (messageContent && messageContent.dataset?.conversationId) {
+        conversationId = messageContent.dataset.conversationId;
       }
 
       selectionRef.current = {
@@ -104,9 +173,7 @@ const HighlightListener = ({ onHighlight }) => {
         conversationId,
       };
 
-      const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-
       showButton(rect.x + window.scrollX, rect.y + rect.height + window.scrollY);
     };
 

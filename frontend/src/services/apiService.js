@@ -216,15 +216,22 @@ class ApiService {
   }
 
   // Chat API methods
-  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true) {
+  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true, askModel = null) {
+    const requestBody = {
+      message,
+      conversation_id: conversationId,
+      per_sub_k: perSubK,
+      include_context: includeContext
+    };
+
+    // Only include ask_model if it's provided
+    if (askModel) {
+      requestBody.ask_model = askModel;
+    }
+
     const response = await this.request('/chat', {
       method: 'POST',
-      body: JSON.stringify({
-        message,
-        conversation_id: conversationId,
-        per_sub_k: perSubK,
-        include_context: includeContext
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     // Convert to legacy format for backward compatibility
