@@ -1,21 +1,31 @@
-fastapi
-uvicorn[standard]
-sentence-transformers
-numpy
-pydantic
-python-multipart
-jinja2
-markdown
-requests
-ollama
-PyPDF2
-pypdf
-docling
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# ML and NLP dependencies
+sentence-transformers>=2.2.2
+numpy>=1.24.0
+
+# Document processing
+PyPDF2>=3.0.1
+pypdf>=3.17.0
+docling>=1.0.0
+
+# Database dependencies
+sqlalchemy>=2.0.23
+psycopg2-binary>=2.9.9
+alembic>=1.13.0
+pgvector>=0.2.4
+
 # Authentication dependencies
-python-jose[cryptography]
-passlib[bcrypt]
-sqlalchemy
-psycopg2-binary
-alembic
-python-dotenv
-pgvector
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Utilities
+jinja2>=3.1.2
+markdown>=3.5.1
+requests>=2.31.0
+ollama>=0.1.7
+python-dotenv>=1.0.0

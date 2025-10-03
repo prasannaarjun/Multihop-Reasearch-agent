@@ -4,7 +4,7 @@ Main chat agent that orchestrates chat functionality with research capabilities.
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from ..shared.interfaces import IAgent
 from ..shared.models import ResearchResult, ChatResponse, ChatMessage, Conversation
 from ..shared.exceptions import AgentError, ConversationError
@@ -133,7 +133,7 @@ class ChatAgent(IAgent):
                     conversation_title=conversation.title,
                     message_count=len(conversation.messages),
                     context_used=False,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                     error=str(e)
                 )
                 

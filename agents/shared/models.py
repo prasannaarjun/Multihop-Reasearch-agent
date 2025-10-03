@@ -3,7 +3,7 @@ Shared data models for the multi-hop research agent system.
 """
 
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import uuid
@@ -76,7 +76,7 @@ class Conversation:
     def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> ChatMessage:
         """Add a new message to the conversation."""
         import uuid
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         message = ChatMessage(
             id=str(uuid.uuid4()),
             role=role,
@@ -166,7 +166,12 @@ class ChatResponse:
 
 # SQLAlchemy Database Models
 # Import Base from auth.database to ensure all models share the same metadata
-from auth.database import Base
+try:
+    from auth.database import Base
+except ImportError:
+    # Fallback for when auth module is not available
+    from sqlalchemy.ext.declarative import declarative_base
+    Base = declarative_base()
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
@@ -205,8 +210,8 @@ class ConversationDB(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     conversation_metadata = Column(Text, nullable=True)  # Store as JSON string for compatibility
     is_active = Column(Boolean, default=True, nullable=False)
     
@@ -225,7 +230,7 @@ class ChatMessageDB(Base):
     conversation_id = Column(String(36), ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     message_metadata = Column(Text, nullable=True)  # Store as JSON string for compatibility
     
     # Relationship to conversation
@@ -244,7 +249,7 @@ class EmbeddingDB(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     vector = Column(Vector(int(os.getenv("EMBEDDING_DIM", "384"))), nullable=False)  # Embedding dimension, configurable via env
     embedding_metadata = Column(JSONB, nullable=True)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationships
     message = relationship("ChatMessageDB", back_populates="embeddings")

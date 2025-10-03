@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Header from './components/Header';
@@ -41,7 +41,7 @@ function AppContent() {
     }
   };
 
-  const handleAskQuestion = async (question, perSubK) => {
+  const handleAskQuestion = useCallback(async (question, perSubK) => {
     setIsLoading(true);
     setError(null);
     setResults(null);
@@ -54,30 +54,30 @@ function AppContent() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const handleExportReport = async (question) => {
+  const handleExportReport = useCallback(async (question) => {
     try {
       await apiService.exportReport(question);
     } catch (err) {
       setError(err.message || 'Failed to export report');
     }
-  };
+  }, []);
 
-  const handleUploadSuccess = (result) => {
+  const handleUploadSuccess = useCallback((result) => {
     setUploadSuccess(result);
     setRefreshStats(prev => prev + 1);
     // Clear success message after 5 seconds
     setTimeout(() => setUploadSuccess(null), 5000);
-  };
+  }, []);
 
-  const handleUploadError = (errorMessage) => {
+  const handleUploadError = useCallback((errorMessage) => {
     setError(errorMessage);
-  };
+  }, []);
 
-  const toggleMode = () => {
+  const toggleMode = useCallback(() => {
     setIsResearchMode(!isResearchMode);
-  };
+  }, [isResearchMode]);
 
   // Show loading while checking authentication
   if (authLoading) {

@@ -7,7 +7,7 @@ import os
 import numpy as np
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func, and_
 from agents.shared.models import EmbeddingDB
 from agents.shared.exceptions import AgentError
 
@@ -111,40 +111,44 @@ def retrieve_similar_embeddings(
         # Convert to numpy array
         query_array = np.array(query_vector, dtype=np.float32)
         
+        # Check for zero vector to avoid division by zero
+        vector_norm = np.linalg.norm(query_array)
+        if vector_norm == 0:
+            raise AgentError("Query vector cannot be all zeros")
+        
         # Normalize query vector for cosine similarity
-        query_norm = query_array / np.linalg.norm(query_array)
+        query_norm = query_array / vector_norm
         
-        # SQL query for vector similarity search
-        # Convert query vector to string format for PostgreSQL
-        query_vector_str = '[' + ','.join(map(str, query_vector)) + ']'
+        # Convert query vector to PostgreSQL array format for vector operations
+        query_vector_array = f"[{','.join(map(str, query_vector))}]"
         
-        sql_query = text(f"""
-            SELECT 
-                e.id,
-                e.message_id,
-                e.user_id,
-                e.embedding_metadata,
-                e.created_at,
-                1 - (e.vector <=> '{query_vector_str}'::vector) as similarity_score
-            FROM embeddings e
-            WHERE e.user_id = :user_id
-            ORDER BY e.vector <=> '{query_vector_str}'::vector
-            LIMIT :k
-        """)
+        # Use SQLAlchemy ORM with func for vector operations
+        # Note: We use the original query_vector (not normalized) for the database query
+        # as the database will handle the vector operations
+        query = db_session.query(
+            EmbeddingDB.id,
+            EmbeddingDB.message_id,
+            EmbeddingDB.user_id,
+            EmbeddingDB.embedding_metadata,
+            EmbeddingDB.created_at,
+            (1 - func.cosine_distance(EmbeddingDB.vector, query_vector_array)).label('similarity_score')
+        ).filter(
+            and_(
+                EmbeddingDB.user_id == user_id,
+                func.cosine_distance(EmbeddingDB.vector, query_vector_array) <= (1 - similarity_threshold)
+            )
+        ).order_by(
+            func.cosine_distance(EmbeddingDB.vector, query_vector_array)
+        ).limit(k)
         
         # Execute query
-        result = db_session.execute(
-            sql_query,
-            {
-                "query_vector": query_norm.tolist(),
-                "user_id": user_id,
-                "k": k
-            }
-        )
+        result = query.all()
         
         # Format results
         embeddings = []
         for row in result:
+            # The similarity threshold is already applied in the query filter
+            # but we double-check here for safety
             if row.similarity_score >= similarity_threshold:
                 embeddings.append({
                     "id": row.id,
@@ -176,35 +180,23 @@ def get_embedding_stats(db_session: Session, user_id: Optional[int] = None) -> D
     """
     try:
         if user_id:
-            # Get stats for specific user
-            count_query = text("SELECT COUNT(*) as count FROM embeddings WHERE user_id = :user_id")
-            result = db_session.execute(count_query, {"user_id": user_id})
-            total_embeddings = result.scalar()
+            # Get stats for specific user using ORM
+            total_embeddings = db_session.query(EmbeddingDB).filter(EmbeddingDB.user_id == user_id).count()
             
-            # Get unique messages count
-            messages_query = text("""
-                SELECT COUNT(DISTINCT message_id) as count 
-                FROM embeddings 
-                WHERE user_id = :user_id
-            """)
-            result = db_session.execute(messages_query, {"user_id": user_id})
-            unique_messages = result.scalar()
+            # Get unique messages count using ORM
+            unique_messages = db_session.query(EmbeddingDB.message_id).filter(
+                EmbeddingDB.user_id == user_id
+            ).distinct().count()
             
         else:
-            # Get stats for all users
-            count_query = text("SELECT COUNT(*) as count FROM embeddings")
-            result = db_session.execute(count_query)
-            total_embeddings = result.scalar()
+            # Get stats for all users using ORM
+            total_embeddings = db_session.query(EmbeddingDB).count()
             
-            # Get unique messages count
-            messages_query = text("SELECT COUNT(DISTINCT message_id) as count FROM embeddings")
-            result = db_session.execute(messages_query)
-            unique_messages = result.scalar()
+            # Get unique messages count using ORM
+            unique_messages = db_session.query(EmbeddingDB.message_id).distinct().count()
             
-            # Get unique users count
-            users_query = text("SELECT COUNT(DISTINCT user_id) as count FROM embeddings")
-            result = db_session.execute(users_query)
-            unique_users = result.scalar()
+            # Get unique users count using ORM
+            unique_users = db_session.query(EmbeddingDB.user_id).distinct().count()
         
         stats = {
             "total_embeddings": total_embeddings,
@@ -238,17 +230,14 @@ def delete_embeddings_by_message(db_session: Session, message_id: str) -> int:
         Number of embeddings deleted
     """
     try:
-        # Count embeddings before deletion
-        count_query = text("SELECT COUNT(*) FROM embeddings WHERE message_id = :message_id")
-        result = db_session.execute(count_query, {"message_id": message_id})
-        count_before = result.scalar()
+        # Count embeddings before deletion using ORM
+        count_before = db_session.query(EmbeddingDB).filter(EmbeddingDB.message_id == message_id).count()
         
-        # Delete embeddings
-        delete_query = text("DELETE FROM embeddings WHERE message_id = :message_id")
-        db_session.execute(delete_query, {"message_id": message_id})
+        # Delete embeddings using ORM
+        deleted_count = db_session.query(EmbeddingDB).filter(EmbeddingDB.message_id == message_id).delete()
         db_session.commit()
         
-        return count_before
+        return deleted_count
         
     except Exception as e:
         db_session.rollback()
@@ -267,17 +256,14 @@ def delete_embeddings_by_user(db_session: Session, user_id: int) -> int:
         Number of embeddings deleted
     """
     try:
-        # Count embeddings before deletion
-        count_query = text("SELECT COUNT(*) FROM embeddings WHERE user_id = :user_id")
-        result = db_session.execute(count_query, {"user_id": user_id})
-        count_before = result.scalar()
+        # Count embeddings before deletion using ORM
+        count_before = db_session.query(EmbeddingDB).filter(EmbeddingDB.user_id == user_id).count()
         
-        # Delete embeddings
-        delete_query = text("DELETE FROM embeddings WHERE user_id = :user_id")
-        db_session.execute(delete_query, {"user_id": user_id})
+        # Delete embeddings using ORM
+        deleted_count = db_session.query(EmbeddingDB).filter(EmbeddingDB.user_id == user_id).delete()
         db_session.commit()
         
-        return count_before
+        return deleted_count
         
     except Exception as e:
         db_session.rollback()

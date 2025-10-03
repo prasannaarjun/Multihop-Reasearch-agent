@@ -5,7 +5,7 @@ Authentication API routes
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 from .database import get_db, User
 from .auth_service import AuthService
 from .auth_models import (
@@ -27,7 +27,7 @@ async def register_user(
     
     try:
         user = auth_service.create_user(user_data)
-        return UserResponse.from_orm(user)
+        return UserResponse.model_validate(user)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,7 +144,7 @@ async def get_current_user_info(
             detail="User not found"
         )
     
-    return UserResponse.from_orm(user)
+    return UserResponse.model_validate(user)
 
 @auth_router.put("/me", response_model=UserResponse)
 async def update_current_user(
@@ -156,14 +156,14 @@ async def update_current_user(
     auth_service = AuthService(db)
     
     try:
-        user = auth_service.update_user(current_user.user_id, user_update.dict(exclude_unset=True))
+        user = auth_service.update_user(current_user.user_id, user_update.model_dump(exclude_unset=True))
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
-        return UserResponse.from_orm(user)
+        return UserResponse.model_validate(user)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -235,7 +235,7 @@ async def list_users(
     auth_service = AuthService(db)
     users = db.query(User).all()
     
-    return [UserResponse.from_orm(user) for user in users]
+    return [UserResponse.model_validate(user) for user in users]
 
 @auth_router.put("/users/{user_id}/deactivate")
 async def deactivate_user(
@@ -272,7 +272,7 @@ async def activate_user(
         )
     
     user.is_active = True
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     
     return {"message": "User activated successfully"}
@@ -295,7 +295,7 @@ async def toggle_admin_status(
         )
     
     user.is_admin = is_admin
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     
     return {"message": f"User admin status set to {is_admin}"}

@@ -6,7 +6,7 @@ Handles conversation state, context, and chat-level interactions.
 import uuid
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
@@ -107,7 +107,7 @@ class ConversationManager(IConversationManager):
         # Update conversation timestamp
         conversation_db = self.db.query(ConversationDB).filter(ConversationDB.id == str(conv_uuid)).first()
         if conversation_db:
-            conversation_db.updated_at = datetime.now()
+            conversation_db.updated_at = datetime.now(timezone.utc)
         
         self.db.commit()
         self.db.refresh(message_db)
@@ -206,7 +206,7 @@ class ConversationManager(IConversationManager):
         conversation_db = self.db.query(ConversationDB).filter(ConversationDB.id == conversation_id).first()
         if conversation_db:
             conversation_db.title = title
-            conversation_db.updated_at = datetime.now()
+            conversation_db.updated_at = datetime.now(timezone.utc)
             self.db.commit()
             return True
         return False
@@ -259,7 +259,7 @@ class ConversationManager(IConversationManager):
 
         metadata["highlights"] = highlights
         conversation_db.conversation_metadata = json.dumps(metadata)
-        conversation_db.updated_at = datetime.now()
+        conversation_db.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(conversation_db)

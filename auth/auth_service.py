@@ -4,7 +4,7 @@ Authentication service with JWT handling and user management
 
 import os
 import bcrypt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -13,7 +13,12 @@ from .database import User, UserSession
 from .auth_models import UserCreate, UserLogin, TokenData, UserResponse, PasswordChange, Token
 
 # Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError(
+        "SECRET_KEY environment variable is not set. "
+        "Please set a secure secret key in your .env file or environment variables."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -49,9 +54,9 @@ class AuthService:
         """Create a JWT access token"""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         
         to_encode.update({"exp": expire, "type": "access"})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -60,7 +65,7 @@ class AuthService:
     def create_refresh_token(self, data: Dict[str, Any]) -> str:
         """Create a JWT refresh token"""
         to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         to_encode.update({"exp": expire, "type": "refresh"})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
@@ -134,7 +139,7 @@ class AuthService:
             raise ValueError("User account is disabled")
         
         # Update last login
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         self.db.commit()
         
         # Create tokens
@@ -154,7 +159,7 @@ class AuthService:
         session = UserSession(
             user_id=user.id,
             session_token=refresh_token,
-            expires_at=datetime.utcnow() + refresh_token_expires,
+            expires_at=datetime.now(timezone.utc) + refresh_token_expires,
             ip_address=ip_address,
             user_agent=user_agent
         )
@@ -165,7 +170,7 @@ class AuthService:
             access_token=access_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=UserResponse.from_orm(user)
+            user=UserResponse.model_validate(user)
         )
     
     def refresh_access_token(self, refresh_token: str) -> Optional[Token]:
@@ -179,7 +184,7 @@ class AuthService:
             and_(
                 UserSession.session_token == refresh_token,
                 UserSession.is_active == True,
-                UserSession.expires_at > datetime.utcnow()
+                UserSession.expires_at > datetime.now(timezone.utc)
             )
         ).first()
         
@@ -201,7 +206,7 @@ class AuthService:
             access_token=access_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=UserResponse.from_orm(user)
+            user=UserResponse.model_validate(user)
         )
     
     def logout_user(self, refresh_token: str) -> bool:
@@ -243,7 +248,7 @@ class AuthService:
         
         # Update password
         user.hashed_password = self.get_password_hash(password_change.new_password)
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         
         # Logout all sessions for security
@@ -268,7 +273,7 @@ class AuthService:
             if hasattr(user, field) and value is not None:
                 setattr(user, field, value)
         
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(user)
         return user
@@ -280,7 +285,7 @@ class AuthService:
             return False
         
         user.is_active = False
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         
         # Logout all sessions
@@ -294,7 +299,7 @@ class AuthService:
             and_(
                 UserSession.user_id == user_id,
                 UserSession.is_active == True,
-                UserSession.expires_at > datetime.utcnow()
+                UserSession.expires_at > datetime.now(timezone.utc)
             )
         ).all()
         return sessions

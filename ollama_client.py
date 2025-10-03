@@ -208,7 +208,7 @@ Provide a comprehensive answer that synthesizes all the research findings:"""
         try:
             self._test_connection()
             return True
-        except:
+        except Exception:
             return False
 
 

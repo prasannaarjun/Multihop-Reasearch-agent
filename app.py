@@ -13,9 +13,8 @@ from contextlib import asynccontextmanager
 import os
 import warnings
 import logging
+import threading
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from io import BytesIO
 
 # Suppress bcrypt version warning
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
@@ -44,17 +43,21 @@ current_model = None
 available_models = []
 embedding_model = None
 
-def get_conversation_manager_for_user(current_user: TokenData):
+# Thread safety lock for model loading
+_model_lock = threading.Lock()
+
+def get_conversation_manager_for_user(current_user: TokenData, db_session=None):
     """Get a conversation manager scoped to the current user."""
-    from auth.database import SessionLocal
-    db_session = SessionLocal()
+    if db_session is None:
+        from auth.database import SessionLocal
+        db_session = SessionLocal()
     return ConversationManager(
         db_session=db_session,
         current_user_id=current_user.user_id,
         is_admin=current_user.is_admin
     )
 
-def get_research_agent_for_user(current_user: TokenData):
+def get_research_agent_for_user(current_user: TokenData, db_session=None):
     """Get a research agent scoped to the current user."""
     global embedding_model, current_model
     
@@ -64,8 +67,9 @@ def get_research_agent_for_user(current_user: TokenData):
             detail="Embedding model not initialized"
         )
     
-    from auth.database import SessionLocal
-    db_session = SessionLocal()
+    if db_session is None:
+        from auth.database import SessionLocal
+        db_session = SessionLocal()
     
     # Create user-scoped document retriever
     retriever = DocumentRetriever(db_session, embedding_model, current_user.user_id)
@@ -85,76 +89,78 @@ def load_available_models():
     """Load available models from Ollama and store them in memory."""
     global available_models, current_model
     
-    try:
-        # Check if Ollama is enabled
-        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
-        if not use_ollama:
+    with _model_lock:
+        try:
+            # Check if Ollama is enabled
+            use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+            if not use_ollama:
+                available_models = []
+                current_model = None
+                return
+        
+            # Get Ollama base URL
+            ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            
+            # Make direct request to Ollama /api/tags endpoint
+            import requests
+            try:
+                response = requests.get(f"{ollama_base_url}/api/tags", timeout=10)
+                response.raise_for_status()
+                ollama_data = response.json()
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"Could not connect to Ollama at {ollama_base_url}: {e}")
+                # For testing purposes, add some mock models
+                logging.info("Adding mock models for testing...")
+                available_models = [
+                    {"name": "llama2:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
+                    {"name": "mistral:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
+                    {"name": "codellama:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""}
+                ]
+                current_model = available_models[0]['name'] if available_models else None
+                logging.info(f"Mock models set: {available_models}")
+                return
+            
+            # Parse models from Ollama response
+            models = []
+            for model in ollama_data.get('models', []):
+                model_info = {
+                    "name": model.get('name', ''),
+                    "size": model.get('size', 0),
+                    "modified_at": model.get('modified_at', ''),
+                    "family": model.get('details', {}).get('family', ''),
+                    "format": model.get('details', {}).get('format', ''),
+                    "families": model.get('details', {}).get('families', []),
+                    "parameter_size": model.get('details', {}).get('parameter_size', ''),
+                    "quantization_level": model.get('details', {}).get('quantization_level', '')
+                }
+                models.append(model_info)
+            
+            available_models = models
+            
+            # Set current model to first available model if none is set
+            if not current_model and models:
+                current_model = models[0]['name']
+                logging.info(f"Auto-selected model: {current_model}")
+            
+        except Exception as e:
+            logging.error(f"Error loading models: {e}")
             available_models = []
             current_model = None
-            return
-        
-        # Get Ollama base URL
-        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        
-        # Make direct request to Ollama /api/tags endpoint
-        import requests
-        try:
-            response = requests.get(f"{ollama_base_url}/api/tags", timeout=10)
-            response.raise_for_status()
-            ollama_data = response.json()
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"Could not connect to Ollama at {ollama_base_url}: {e}")
-            # For testing purposes, add some mock models
-            logging.info("Adding mock models for testing...")
-            available_models = [
-                {"name": "llama2:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
-                {"name": "mistral:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
-                {"name": "codellama:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""}
-            ]
-            current_model = available_models[0]['name'] if available_models else None
-            logging.info(f"Mock models set: {available_models}")
-            return
-        
-        # Parse models from Ollama response
-        models = []
-        for model in ollama_data.get('models', []):
-            model_info = {
-                "name": model.get('name', ''),
-                "size": model.get('size', 0),
-                "modified_at": model.get('modified_at', ''),
-                "family": model.get('details', {}).get('family', ''),
-                "format": model.get('details', {}).get('format', ''),
-                "families": model.get('details', {}).get('families', []),
-                "parameter_size": model.get('details', {}).get('parameter_size', ''),
-                "quantization_level": model.get('details', {}).get('quantization_level', '')
-            }
-            models.append(model_info)
-        
-        available_models = models
-        
-        # Set current model to first available model if none is set
-        if not current_model and models:
-            current_model = models[0]['name']
-            logging.info(f"Auto-selected model: {current_model}")
-        
-    except Exception as e:
-        logging.error(f"Error loading models: {e}")
-        available_models = []
-        current_model = None
 
 def set_current_model(model_name: str) -> bool:
     """Set the current model if it exists in available models."""
     global current_model
     
-    if not available_models:
+    with _model_lock:
+        if not available_models:
+            return False
+        
+        # Check if model exists
+        model_exists = any(model['name'] == model_name for model in available_models)
+        if model_exists:
+            current_model = model_name
+            return True
         return False
-    
-    # Check if model exists
-    model_exists = any(model['name'] == model_name for model in available_models)
-    if model_exists:
-        current_model = model_name
-        return True
-    return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -332,9 +338,13 @@ async def ask_question(
     Returns:
         Research results with answer, subqueries, and citations
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
+        db_session = SessionLocal()
         # Get user-scoped research agent
-        user_research_agent = get_research_agent_for_user(current_user)
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
         
         # Ask the research agent
         result = user_research_agent.ask(
@@ -360,6 +370,9 @@ async def ask_question(
             status_code=500,
             detail=f"Error processing question: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/export")
 async def export_report(question: str, current_user: TokenData = Depends(get_current_active_user)):
@@ -372,9 +385,13 @@ async def export_report(question: str, current_user: TokenData = Depends(get_cur
     Returns:
         Markdown report file
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
+        db_session = SessionLocal()
         # Get user-scoped research agent
-        user_research_agent = get_research_agent_for_user(current_user)
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
         
         # Get research results
         result = user_research_agent.ask(question, per_sub_k=3)
@@ -396,13 +413,20 @@ async def export_report(question: str, current_user: TokenData = Depends(get_cur
             status_code=500,
             detail=f"Error generating report: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/stats")
 async def get_stats(current_user: TokenData = Depends(get_current_active_user)):
     """Get statistics about the research agent."""
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
+        db_session = SessionLocal()
         # Get user-scoped research agent
-        user_research_agent = get_research_agent_for_user(current_user)
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
         
         # Get collection stats
         stats = user_research_agent.get_collection_stats()
@@ -419,6 +443,9 @@ async def get_stats(current_user: TokenData = Depends(get_current_active_user)):
             status_code=500,
             detail=f"Error getting stats: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
@@ -463,9 +490,10 @@ async def upload_file(
 
         # Process and store the file using the new ingestion system
         from auth.database import SessionLocal
-        db_session = SessionLocal()
+        db_session = None
         
         try:
+            db_session = SessionLocal()
             result = process_and_store_file_content(
                 db_session=db_session,
                 user_id=current_user.user_id,
@@ -487,7 +515,8 @@ async def upload_file(
                 raise HTTPException(status_code=400, detail=result["message"])
                 
         finally:
-            db_session.close()
+            if db_session:
+                db_session.close()
 
     except DocumentProcessingError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -507,9 +536,13 @@ async def get_collection_stats_endpoint(current_user: TokenData = Depends(get_cu
     Returns:
         Collection statistics including file types and counts
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
+        db_session = SessionLocal()
         # Get user-scoped research agent
-        user_research_agent = get_research_agent_for_user(current_user)
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
         
         # Get collection stats
         stats = user_research_agent.get_collection_stats()
@@ -534,6 +567,9 @@ async def get_collection_stats_endpoint(current_user: TokenData = Depends(get_cu
             status_code=500,
             detail=f"Error getting collection stats: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/supported-file-types")
 async def get_supported_file_types():
@@ -670,12 +706,16 @@ async def chat_with_agent(
     Returns:
         Chat response with answer and conversation info
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
+        db_session = SessionLocal()
         # Get user-scoped research agent
-        user_research_agent = get_research_agent_for_user(current_user)
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
         
         # Create user-scoped conversation manager and chat agent
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         user_chat_agent = ChatAgent(user_research_agent, conversation_manager)
         
         # If selected text is provided, store it as a highlight
@@ -720,6 +760,9 @@ async def chat_with_agent(
             status_code=500,
             detail=f"Error processing chat message: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/conversations", response_model=List[ConversationInfo])
 async def list_conversations(
@@ -731,8 +774,12 @@ async def list_conversations(
     Returns:
         List of conversation information
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         conversations = conversation_manager.list_conversations()
         return [ConversationInfo(**conv) for conv in conversations]
     except Exception as e:
@@ -740,6 +787,9 @@ async def list_conversations(
             status_code=500,
             detail=f"Error listing conversations: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationHistoryResponse)
 async def get_conversation_history(
@@ -757,8 +807,12 @@ async def get_conversation_history(
     Returns:
         Conversation history with messages
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         conversation = conversation_manager.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(
@@ -782,6 +836,9 @@ async def get_conversation_history(
             status_code=500,
             detail=f"Error getting conversation history: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.post("/conversations", response_model=Dict[str, str])
 async def create_conversation(
@@ -797,8 +854,12 @@ async def create_conversation(
     Returns:
         Conversation ID
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         conversation_id = conversation_manager.create_conversation(request.title)
         return {"conversation_id": conversation_id, "title": request.title}
     except Exception as e:
@@ -806,6 +867,9 @@ async def create_conversation(
             status_code=500,
             detail=f"Error creating conversation: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.put("/conversations/{conversation_id}/title")
 async def update_conversation_title(
@@ -823,8 +887,12 @@ async def update_conversation_title(
     Returns:
         Success message
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         success = conversation_manager.update_conversation_title(conversation_id, request.title)
         if not success:
             raise HTTPException(
@@ -839,6 +907,9 @@ async def update_conversation_title(
             status_code=500,
             detail=f"Error updating conversation title: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.delete("/conversations/{conversation_id}")
 async def delete_conversation(
@@ -854,8 +925,12 @@ async def delete_conversation(
     Returns:
         Success message
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         success = conversation_manager.delete_conversation(conversation_id)
         if not success:
             raise HTTPException(
@@ -870,6 +945,9 @@ async def delete_conversation(
             status_code=500,
             detail=f"Error deleting conversation: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 @app.get("/conversations/{conversation_id}/suggestions")
 async def get_follow_up_suggestions(
@@ -885,8 +963,12 @@ async def get_follow_up_suggestions(
     Returns:
         List of suggested follow-up questions
     """
+    from auth.database import SessionLocal
+    db_session = None
+    
     try:
-        conversation_manager = get_conversation_manager_for_user(current_user)
+        db_session = SessionLocal()
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
         # Verify conversation exists and user has access
         conversation = conversation_manager.get_conversation(conversation_id)
         if not conversation:
@@ -906,6 +988,9 @@ async def get_follow_up_suggestions(
             status_code=500,
             detail=f"Error getting suggestions: {str(e)}"
         )
+    finally:
+        if db_session:
+            db_session.close()
 
 if __name__ == "__main__":
     import uvicorn

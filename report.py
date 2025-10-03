@@ -27,7 +27,7 @@ def generate_markdown_report(result: Dict[str, Any], use_ollama: bool = True) ->
             ollama_client = OllamaClient()
             if ollama_client.is_available():
                 intro = ollama_client.generate_report_intro(question)
-        except:
+        except Exception:
             pass
     
     # Generate report

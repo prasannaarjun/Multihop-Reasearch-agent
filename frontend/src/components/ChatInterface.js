@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ChatInterface.css';
 import ChatMessage from './ChatMessage';
 import ConversationList from './ConversationList';
@@ -200,12 +200,12 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     setAskModelModalOpen(false);
   };
 
-  const handleModelChange = (newModel) => {
+  const handleModelChange = useCallback((newModel) => {
     setCurrentModel(newModel);
     // Show a success notification
     setError(`Model successfully changed to ${newModel}`);
     setTimeout(() => setError(null), 3000);
-  };
+  }, []); // Empty dependency array since it only uses setState functions
 
   const handleLogout = async () => {
     try {
@@ -380,6 +380,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
             </div>
             <div className="chat-input-right">
               <ModelSelector
+                key="model-selector" // Add key for debugging
                 currentModel={currentModel}
                 onModelChange={handleModelChange}
                 disabled={isLoading}
