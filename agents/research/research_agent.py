@@ -178,35 +178,67 @@ class ResearchAgent(IAgent):
     def _process_iterative(self, question: str, per_sub_k: int, start_time: float) -> ResearchResult:
         """
         New iterative processing: generate subqueries one at a time based on results.
-        Stops early when sufficient information is gathered.
+        Stops early when sufficient information is gathered or all aspects are covered.
         """
         # Analyze complexity
         complexity = self.query_planner.analyze_complexity(question)
         print(f"Complexity: {complexity.complexity_score:.2f} - {complexity.reasoning}")
         print(f"Estimated hops needed: {complexity.estimated_hops}")
         
+        # Extract aspects for coverage tracking
+        aspect_coverage = None
+        if self.query_planner.enable_aspect_coverage:
+            aspect_coverage = self.query_planner.extract_aspects(question, self.llm_client)
+            print(f"\n📋 Identified Aspects ({len(aspect_coverage.aspects)}):")
+            for i, aspect in enumerate(aspect_coverage.aspects, 1):
+                importance_label = "CORE" if aspect.importance >= 0.8 else "optional"
+                print(f"  {i}. [{importance_label}] {aspect.aspect} ({aspect.aspect_type})")
+            print()
+        
         subquery_results = []
         all_citations = []
         current_hop = 0
         max_hops = self.query_planner.max_hops
         
-        # Generate initial set of candidate subqueries using LLM
+        # Check LLM availability
         if not self.use_llm or self.llm_client is None:
             raise AgentError("LLM client is required for subquery generation. Please provide a valid LLM client.")
         
-        candidate_subqueries = self.llm_client.generate_subqueries(question, target_count=complexity.estimated_hops)
-        
-        # Score and prioritize subqueries
-        scored_subqueries = self.query_planner.score_subqueries(question, candidate_subqueries)
-        print(f"Generated {len(scored_subqueries)} candidate subqueries (prioritized)")
-        
-        # Process subqueries iteratively
-        for scored in scored_subqueries:
+        # Aspect-guided iterative loop
+        while current_hop < max_hops:
             current_hop += 1
-            subquery = scored.subquery
             
-            print(f"\n[Hop {current_hop}/{max_hops}] Subquery: {subquery}")
-            print(f"  Relevance: {scored.relevance_score:.2f} - {scored.reasoning}")
+            # Determine which aspects need coverage
+            if aspect_coverage is not None:
+                uncovered = aspect_coverage.get_uncovered_aspects(threshold=0.5)
+                
+                if uncovered:
+                    # Generate subqueries targeting uncovered aspects
+                    print(f"\n[Hop {current_hop}/{max_hops}] Targeting {len(uncovered)} uncovered aspects")
+                    
+                    subquery_mappings = self.query_planner.generate_subqueries_for_aspects(
+                        question, uncovered, self.llm_client, max_subqueries=1
+                    )
+                    
+                    if not subquery_mappings:
+                        print("  No subqueries generated, stopping")
+                        break
+                    
+                    subquery, target_aspect = subquery_mappings[0]
+                    print(f"  🎯 Targeting Aspect: {target_aspect}")
+                    print(f"  Subquery: {subquery}")
+                else:
+                    # All aspects covered, optionally do one more exploratory query
+                    print(f"\n[Hop {current_hop}/{max_hops}] All aspects covered, stopping")
+                    break
+            else:
+                # No aspect coverage tracking, generate generic subquery
+                candidate_subqueries = self.llm_client.generate_subqueries(question, target_count=1)
+                if not candidate_subqueries:
+                    break
+                subquery = candidate_subqueries[0]
+                target_aspect = "General"
+                print(f"\n[Hop {current_hop}/{max_hops}] Subquery: {subquery}")
             
             # Retrieve documents for this subquery
             try:
@@ -241,9 +273,21 @@ class ResearchAgent(IAgent):
                 
                 subquery_results.append(subquery_result)
                 
+                # Update aspect coverage if enabled
+                if aspect_coverage is not None:
+                    self.query_planner.update_aspect_coverage(aspect_coverage, all_citations, current_hop)
+                    
+                    # Show coverage progress
+                    uncovered = aspect_coverage.get_uncovered_aspects()
+                    coverage_pct = aspect_coverage.get_coverage_percentage()
+                    print(f"  📊 Coverage: {coverage_pct:.1%} ({len(uncovered)} aspects uncovered)")
+                    
+                    if uncovered:
+                        print(f"  Uncovered: {[a.aspect for a in uncovered[:2]]}")  # Show first 2
+                
                 # Check if we should continue
                 should_continue, reasoning = self.query_planner.should_continue_retrieval(
-                    all_citations, current_hop
+                    all_citations, current_hop, aspect_coverage=aspect_coverage
                 )
                 
                 print(f"  Decision: {'Continue' if should_continue else 'Stop'} - {reasoning}")
@@ -268,6 +312,41 @@ class ResearchAgent(IAgent):
         
         processing_time = time.time() - start_time
         
+        # Build metadata
+        metadata = {
+            'use_llm': self.use_llm,
+            'mode': 'iterative_aspect_guided',
+            'adaptive': True,
+            'complexity_score': complexity.complexity_score,
+            'estimated_hops': complexity.estimated_hops,
+            'actual_hops': current_hop,
+            'subquery_count': len(subquery_results),
+            'successful_subqueries': len([r for r in subquery_results if r.success]),
+            'early_stop': current_hop < max_hops
+        }
+        
+        # Add aspect coverage metadata if enabled
+        if aspect_coverage is not None:
+            metadata['aspect_coverage'] = {
+                'enabled': True,
+                'total_aspects': len(aspect_coverage.aspects),
+                'coverage_percentage': aspect_coverage.get_coverage_percentage(),
+                'weighted_coverage': aspect_coverage.get_weighted_coverage(),
+                'uncovered_count': len(aspect_coverage.get_uncovered_aspects()),
+                'aspects': [
+                    {
+                        'aspect': a.aspect,
+                        'type': a.aspect_type,
+                        'importance': a.importance,
+                        'coverage_score': aspect_coverage.coverage_scores.get(a.aspect, 0.0),
+                        'covered_at_hop': aspect_coverage.covered_by_hop.get(a.aspect)
+                    }
+                    for a in aspect_coverage.aspects
+                ]
+            }
+        else:
+            metadata['aspect_coverage'] = {'enabled': False}
+        
         return ResearchResult(
             question=question,
             answer=final_answer,
@@ -275,18 +354,7 @@ class ResearchAgent(IAgent):
             citations=all_citations,
             total_documents=len(all_citations),
             processing_time=processing_time,
-            metadata={
-                'use_llm': self.use_llm,
-                'mode': 'iterative',
-                'adaptive': True,
-                'complexity_score': complexity.complexity_score,
-                'estimated_hops': complexity.estimated_hops,
-                'actual_hops': current_hop,
-                'candidate_count': len(candidate_subqueries),
-                'subquery_count': len(subquery_results),
-                'successful_subqueries': len([r for r in subquery_results if r.success]),
-                'early_stop': current_hop < len(scored_subqueries)
-            }
+            metadata=metadata
         )
     
     def ask(self, question: str, per_sub_k: int = 3) -> Dict[str, Any]:

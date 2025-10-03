@@ -2,7 +2,7 @@
 Pydantic models for authentication API
 """
 
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
 from typing import Optional
 from datetime import datetime
 import re
@@ -12,7 +12,8 @@ class UserBase(BaseModel):
     username: str
     email: EmailStr
     
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def validate_username(cls, v):
         if len(v) < 3:
             raise ValueError('Username must be at least 3 characters long')
@@ -27,7 +28,8 @@ class UserCreate(UserBase):
     password: str
     full_name: Optional[str] = None
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 6:
             raise ValueError('Password must be at least 6 characters long')
@@ -50,8 +52,7 @@ class UserResponse(UserBase):
     last_login: Optional[datetime] = None
     full_name: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     """Token response model"""
@@ -71,7 +72,8 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_new_password(cls, v):
         if len(v) < 6:
             raise ValueError('New password must be at least 6 characters long')
@@ -93,5 +95,4 @@ class SessionInfo(BaseModel):
     user_agent: Optional[str] = None
     is_active: bool
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
