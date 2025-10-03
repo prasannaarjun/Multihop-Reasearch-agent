@@ -16,7 +16,7 @@ const Header = ({ onToggleMode, isResearchMode }) => {
       <div className="header-content">
         <div className="header-main">
           <h1>🔍 Multi-hop Research Agent</h1>
-          <p>Ask complex questions and get comprehensive answers using Chroma-powered document retrieval</p>
+          <p>Ask complex questions and get comprehensive answers using Postgres + pgvector document retrieval</p>
         </div>
         
         {isAuthenticated && user && (

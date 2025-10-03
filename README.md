@@ -1,13 +1,13 @@
 # Multi-hop Research Agent
 
-A sophisticated research platform that combines multi-hop reasoning with document retrieval capabilities, featuring both research and conversational chat modes. The system uses ChromaDB for semantic search, optional Ollama integration for LLM capabilities, and includes a modern React frontend with comprehensive authentication.
+A sophisticated research platform that combines multi-hop reasoning with document retrieval capabilities, featuring both research and conversational chat modes. The system uses Postgres + pgvector for semantic search, optional Ollama integration for LLM capabilities, and includes a modern React frontend with comprehensive authentication.
 
 ## 🚀 Features
 
 - **Multi-hop Research**: Advanced query decomposition and reasoning across multiple documents
 - **Conversational Chat**: Interactive chat interface with conversation history
 - **Document Processing**: Support for PDF, text, and LaTeX document ingestion
-- **Semantic Search**: ChromaDB-powered vector search with sentence transformers
+- **Semantic Search**: Postgres + pgvector-powered vector search with sentence transformers
 - **User Authentication**: JWT-based authentication with user management
 - **Modern Frontend**: React-based web interface with responsive design
 - **Modular Architecture**: Clean separation of concerns with well-defined interfaces
@@ -23,7 +23,8 @@ A sophisticated research platform that combines multi-hop reasoning with documen
 ├── auth/                      # Authentication system
 ├── frontend/                  # React web application
 ├── tests/                     # Test suite
-├── chroma_db/                 # ChromaDB vector database
+├── embedding_storage.py       # Postgres + pgvector embedding utilities
+├── document_ingestion.py      # Document processing and ingestion
 ├── alembic/                   # Database migrations
 └── examples/                  # Setup examples and utilities
 ```
@@ -37,7 +38,7 @@ The heart of the system, implementing a modular agent architecture:
 #### Research Agent (`agents/research/`)
 - **ResearchAgent**: Main orchestrator for research operations
 - **QueryPlanner**: Decomposes complex questions into sub-queries
-- **DocumentRetriever**: Handles semantic search and document retrieval
+- **DocumentRetriever**: Handles Postgres + pgvector semantic search and document retrieval
 - **AnswerSynthesizer**: Combines multiple sources into comprehensive answers
 
 #### Chat Agent (`agents/chat/`)
@@ -95,7 +96,7 @@ Comprehensive test coverage:
 ### Backend
 - **FastAPI**: High-performance web framework
 - **SQLAlchemy**: Database ORM with PostgreSQL support
-- **ChromaDB**: Vector database for semantic search
+- **Postgres + pgvector**: Vector database for semantic search
 - **Sentence Transformers**: Text embedding generation
 - **Ollama**: Optional local LLM integration
 - **JWT**: Secure token-based authentication
@@ -119,7 +120,7 @@ Comprehensive test coverage:
 
 - Python 3.8+
 - Node.js 16+
-- PostgreSQL database
+- PostgreSQL database with pgvector extension
 - (Optional) Ollama for local LLM support
 
 ### Installation
@@ -146,10 +147,14 @@ Comprehensive test coverage:
 
 3. **Database Setup**
    ```powershell
+   # Install pgvector extension in PostgreSQL
+   # Connect to your PostgreSQL database and run:
+   # CREATE EXTENSION IF NOT EXISTS vector;
+   
    # Initialize database
    python -m auth.init_db
    
-   # Run migrations
+   # Run migrations (includes embeddings table with pgvector)
    alembic upgrade head
    ```
 
@@ -176,11 +181,25 @@ Comprehensive test coverage:
 Add documents to the knowledge base:
 
 ```python
-# Example: Add documents to ChromaDB
-from embeddings import add_file_to_index
+# Example: Add documents to Postgres + pgvector
+from document_ingestion import process_and_store_document
+from sentence_transformers import SentenceTransformer
+from auth.database import SessionLocal
 
-# Add a PDF file
-add_file_to_index("path/to/document.pdf", "collection_name")
+# Initialize components
+db_session = SessionLocal()
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Add a document
+result = process_and_store_document(
+    db_session=db_session,
+    user_id=1,  # Your user ID
+    file_path="path/to/document.pdf",
+    filename="document.pdf",
+    model=model
+)
+
+print(f"Added {result['chunks_added']} chunks to the database")
 ```
 
 ## 📖 Usage
@@ -228,6 +247,9 @@ DATABASE_URL=postgresql://user:password@localhost:5432/research_agent_auth
 SECRET_KEY=your-secret-key-change-this-in-production
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
+# Embedding Configuration
+EMBEDDING_DIM=1536  # Default embedding dimension (configurable)
+
 # LLM Integration
 USE_OLLAMA=true
 OLLAMA_MODEL=mistral:latest
@@ -249,6 +271,9 @@ python -m pytest -v
 python -m pytest test_auth.py -v
 python -m pytest test_research_agent.py -v
 python -m pytest test_chat_agent.py -v
+python -m pytest test_embedding_storage.py -v
+python -m pytest test_document_ingestion.py -v
+python -m pytest test_document_retriever_postgres.py -v
 ```
 
 ## 🏗️ Architecture Highlights
@@ -267,7 +292,8 @@ python -m pytest test_chat_agent.py -v
 ### Scalability
 - Stateless API design
 - Database connection pooling
-- Vector database optimization
+- Postgres + pgvector optimization with IVFFlat indexing
+- Multi-tenant user isolation
 - Modular frontend components
 
 ### Error Handling
@@ -287,6 +313,24 @@ python -m pytest test_chat_agent.py -v
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🔄 Migration from ChromaDB
+
+If you're upgrading from a previous version that used ChromaDB:
+
+1. **Install pgvector extension** in your PostgreSQL database:
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS vector;
+   ```
+
+2. **Run the migration** to create the embeddings table:
+   ```powershell
+   alembic upgrade head
+   ```
+
+3. **Re-upload your documents** through the web interface or API, as the embedding storage format has changed.
+
+4. **Remove old ChromaDB files** (the `chroma_db/` directory is no longer needed).
 
 ## 🔮 Future Enhancements
 

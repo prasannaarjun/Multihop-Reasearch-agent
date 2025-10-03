@@ -13,6 +13,8 @@ from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Foreign
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
+import os
 
 
 class MessageRole(Enum):
@@ -228,3 +230,22 @@ class ChatMessageDB(Base):
     
     # Relationship to conversation
     conversation = relationship("ConversationDB", back_populates="messages")
+    
+    # Relationship to embeddings
+    embeddings = relationship("EmbeddingDB", back_populates="message", cascade="all, delete-orphan")
+
+
+class EmbeddingDB(Base):
+    """SQLAlchemy model for embeddings stored in database with pgvector support."""
+    __tablename__ = "embeddings"
+    
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    message_id = Column(String(36), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    vector = Column(Vector(int(os.getenv("EMBEDDING_DIM", "384"))), nullable=False)  # Embedding dimension, configurable via env
+    embedding_metadata = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    
+    # Relationships
+    message = relationship("ChatMessageDB", back_populates="embeddings")
+    user = relationship("User")

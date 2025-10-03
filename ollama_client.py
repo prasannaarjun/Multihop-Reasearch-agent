@@ -1,4 +1,5 @@
 import ollama
+import logging
 from typing import List, Dict, Any, Optional
 import json
 
@@ -23,10 +24,10 @@ class OllamaClient:
         # Test connection
         try:
             self._test_connection()
-            print(f"Ollama client initialized with model: {model_name}")
+            logging.info(f"Ollama client initialized with model: {model_name}")
         except Exception as e:
-            print(f"Warning: Could not connect to Ollama at {base_url}: {e}")
-            print("Make sure Ollama is running and the model is available")
+            logging.warning(f"Could not connect to Ollama at {base_url}: {e}")
+            logging.warning("Make sure Ollama is running and the model is available")
     
     def _test_connection(self):
         """Test connection to Ollama."""
@@ -34,10 +35,10 @@ class OllamaClient:
             models = self.client.list()
             available_models = [model['name'] for model in models['models']]
             if self.model_name not in available_models:
-                print(f"Warning: Model '{self.model_name}' not found. Available models: {available_models}")
+                logging.warning(f"Model '{self.model_name}' not found. Available models: {available_models}")
                 if available_models:
                     self.model_name = available_models[0]
-                    print(f"Using model: {self.model_name}")
+                    logging.info(f"Using model: {self.model_name}")
         except Exception as e:
             # Try a simple test generation instead
             try:
@@ -46,7 +47,7 @@ class OllamaClient:
                     messages=[{"role": "user", "content": "Hello"}],
                     options={"num_predict": 10}
                 )
-                print(f"Ollama connection successful with model: {self.model_name}")
+                logging.info(f"Ollama connection successful with model: {self.model_name}")
             except Exception as e2:
                 raise Exception(f"Failed to connect to Ollama: {e2}")
     
@@ -81,7 +82,7 @@ class OllamaClient:
             return response['message']['content'].strip()
             
         except Exception as e:
-            print(f"Error generating text: {e}")
+            logging.error(f"Error generating text: {e}")
             return f"Error: Could not generate text - {e}"
     
     def generate_subqueries(self, question: str) -> List[str]:
@@ -211,23 +212,3 @@ Provide a comprehensive answer that synthesizes all the research findings:"""
             return False
 
 
-if __name__ == "__main__":
-    # Test the Ollama client
-    client = OllamaClient()
-    
-    if client.is_available():
-        print("Testing Ollama client...")
-        
-        # Test subquery generation
-        question = "What are the best machine learning algorithms for image recognition?"
-        subqueries = client.generate_subqueries(question)
-        print(f"\nGenerated subqueries for '{question}':")
-        for i, sq in enumerate(subqueries, 1):
-            print(f"{i}. {sq}")
-        
-        # Test text generation
-        test_prompt = "Explain machine learning in one paragraph."
-        response = client.generate_text(test_prompt)
-        print(f"\nTest generation:\n{response}")
-    else:
-        print("Ollama is not available. Please start Ollama and pull a model first.")

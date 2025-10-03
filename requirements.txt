@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 sentence-transformers
-chromadb
 numpy
 pydantic
 python-multipart
@@ -19,3 +18,4 @@ sqlalchemy
 psycopg2-binary
 alembic
 python-dotenv
+pgvector

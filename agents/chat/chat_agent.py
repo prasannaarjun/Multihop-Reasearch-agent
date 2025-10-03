@@ -326,17 +326,27 @@ if __name__ == "__main__":
     # Test the chat agent
     from ..research.research_agent import ResearchAgent
     from ..research.document_retriever import DocumentRetriever
-    from embeddings import load_index
+    from sentence_transformers import SentenceTransformer
+    from auth.database import SessionLocal
     from ollama_client import OllamaClient
     
     print("Testing Chat Agent")
     print("=" * 50)
     
     try:
-        # Initialize research agent
-        collection, model = load_index("chroma_db")
-        retriever = DocumentRetriever(collection, model)
+        # Initialize database session
+        db_session = SessionLocal()
+        
+        # Load embedding model
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Create retriever (using user_id=1 for testing)
+        retriever = DocumentRetriever(db_session, model, user_id=1)
+        
+        # Initialize LLM client
         llm_client = OllamaClient()
+        
+        # Create research agent
         research_agent = ResearchAgent(retriever, llm_client)
         
         # Create chat agent
@@ -362,3 +372,6 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"Error: {e}")
+    finally:
+        if 'db_session' in locals():
+            db_session.close()

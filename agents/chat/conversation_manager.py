@@ -143,6 +143,11 @@ class ConversationManager(IConversationManager):
         elif not self.is_admin:
             return []  # No user, no conversations
         
+        # Filter out system conversations for document uploads
+        query = query.filter(
+            ~ConversationDB.conversation_metadata.like('%"source": "document_upload"%')
+        )
+        
         conversations_db = query.order_by(ConversationDB.updated_at.desc()).all()
         
         conversations = []

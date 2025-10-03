@@ -29,9 +29,10 @@ from agents.shared.exceptions import AgentError
 
 # Import existing utilities
 from report import generate_markdown_report, save_report
-from embeddings import add_file_to_index, get_collection_stats, load_index
 from document_processing import process_file, SUPPORTED_EXTENSIONS, DocumentProcessingError
+from document_ingestion import process_and_store_file_content, get_user_document_stats
 from ollama_client import OllamaClient
+from sentence_transformers import SentenceTransformer
 
 # Authentication imports
 from auth import auth_router, get_current_active_user, TokenData
@@ -41,6 +42,7 @@ from auth.database import create_tables
 research_agent = None
 current_model = None
 available_models = []
+embedding_model = None
 
 def get_conversation_manager_for_user(current_user: TokenData):
     """Get a conversation manager scoped to the current user."""
@@ -51,6 +53,33 @@ def get_conversation_manager_for_user(current_user: TokenData):
         current_user_id=current_user.user_id,
         is_admin=current_user.is_admin
     )
+
+def get_research_agent_for_user(current_user: TokenData):
+    """Get a research agent scoped to the current user."""
+    global embedding_model, current_model
+    
+    if embedding_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding model not initialized"
+        )
+    
+    from auth.database import SessionLocal
+    db_session = SessionLocal()
+    
+    # Create user-scoped document retriever
+    retriever = DocumentRetriever(db_session, embedding_model, current_user.user_id)
+    
+    # Initialize LLM client if enabled
+    llm_client = None
+    use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+    if use_ollama and current_model:
+        llm_client = OllamaClient(model_name=current_model)
+        if not llm_client.is_available():
+            llm_client = None
+    
+    # Create research agent
+    return ResearchAgent(retriever, llm_client, use_ollama, current_model)
 
 def load_available_models():
     """Load available models from Ollama and store them in memory."""
@@ -74,16 +103,16 @@ def load_available_models():
             response.raise_for_status()
             ollama_data = response.json()
         except requests.exceptions.RequestException as e:
-            print(f"Warning: Could not connect to Ollama at {ollama_base_url}: {e}")
+            logging.warning(f"Could not connect to Ollama at {ollama_base_url}: {e}")
             # For testing purposes, add some mock models
-            print("Adding mock models for testing...")
+            logging.info("Adding mock models for testing...")
             available_models = [
                 {"name": "llama2:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
                 {"name": "mistral:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
                 {"name": "codellama:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""}
             ]
             current_model = available_models[0]['name'] if available_models else None
-            print(f"Mock models set: {available_models}")
+            logging.info(f"Mock models set: {available_models}")
             return
         
         # Parse models from Ollama response
@@ -106,10 +135,10 @@ def load_available_models():
         # Set current model to first available model if none is set
         if not current_model and models:
             current_model = models[0]['name']
-            print(f"Auto-selected model: {current_model}")
+            logging.info(f"Auto-selected model: {current_model}")
         
     except Exception as e:
-        print(f"Error loading models: {e}")
+        logging.error(f"Error loading models: {e}")
         available_models = []
         current_model = None
 
@@ -130,13 +159,13 @@ def set_current_model(model_name: str) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
-    global research_agent, current_model, available_models
+    global research_agent, current_model, available_models, embedding_model
     
     # Startup
     try:
         # Create database tables
         create_tables()
-        print("Database tables created successfully")
+        logging.info("Database tables created successfully")
         
         # Load available models from Ollama
         load_available_models()
@@ -144,51 +173,38 @@ async def lifespan(app: FastAPI):
         # Get configuration from environment variables
         use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
         
-        # Load Chroma index
-        collection, model = load_index("chroma_db")
+        # Initialize embedding model
+        embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        logging.info("Embedding model loaded successfully")
         
-        # Initialize document retriever
-        retriever = DocumentRetriever(collection, model)
+        # Note: Document retriever and research agent are now created per-request
+        # with user-scoped database sessions for multi-tenant support
         
-        # Initialize LLM client if enabled and model is available
-        llm_client = None
-        if use_ollama and current_model:
-            llm_client = OllamaClient(model_name=current_model)
-            if not llm_client.is_available():
-                print("Warning: Ollama not available, falling back to rule-based processing")
-                llm_client = None
-        elif use_ollama and not current_model:
-            print("Warning: No models available, falling back to rule-based processing")
-        
-        # Initialize research agent
-        research_agent = ResearchAgent(retriever, llm_client, use_ollama, current_model)
-        
-        # Note: Chat agent is now created per-request with user-scoped conversation manager
-        # No global chat agent needed since each request gets its own scoped instance
-        
-        print("Research agent initialized successfully")
+        logging.info("Research agent system initialized successfully")
         if current_model:
-            print(f"Using model: {current_model}")
-        print("Starting Multi-hop Research Agent API (Modular Version)...")
+            logging.info(f"Using LLM model: {current_model}")
+        logging.info("Starting Multi-hop Research Agent API (Postgres Version)...")
     except Exception as e:
-        print(f"Failed to initialize agents: {e}")
+        logging.error(f"Failed to initialize agents: {e}")
         research_agent = None
+        embedding_model = None
     
     yield
     
     # Shutdown
-    print("Shutting down Multi-hop Research Agent API...")
+    logging.info("Shutting down Multi-hop Research Agent API...")
     
     # Clear global variables
     available_models = []
     current_model = None
     research_agent = None
-    print("Global variables cleared.")
+    embedding_model = None
+    logging.info("Global variables cleared.")
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Multi-hop Research Agent",
-    description="A research agent that uses Chroma for document retrieval and multi-hop reasoning",
+    description="A research agent that uses Postgres + pgvector for document retrieval and multi-hop reasoning",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -288,7 +304,8 @@ async def root():
         "message": "Multi-hop Research Agent API",
         "version": "1.0.0",
         "status": "running",
-        "agent_initialized": research_agent is not None
+        "embedding_model_initialized": embedding_model is not None,
+        "database_type": "Postgres + pgvector"
     }
 
 @app.get("/health")
@@ -296,7 +313,9 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "agent_initialized": research_agent is not None
+        "agent_initialized": embedding_model is not None,
+        "embedding_model_initialized": embedding_model is not None,
+        "database_type": "Postgres + pgvector"
     }
 
 @app.post("/ask", response_model=QuestionResponse)
@@ -313,15 +332,12 @@ async def ask_question(
     Returns:
         Research results with answer, subqueries, and citations
     """
-    if research_agent is None:
-        raise HTTPException(
-            status_code=503, 
-            detail="Research agent not initialized. Please check if Chroma database exists."
-        )
-    
     try:
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user)
+        
         # Ask the research agent
-        result = research_agent.ask(
+        result = user_research_agent.ask(
             question=request.question,
             per_sub_k=request.per_sub_k
         )
@@ -346,7 +362,7 @@ async def ask_question(
         )
 
 @app.get("/export")
-async def export_report(question: str):
+async def export_report(question: str, current_user: TokenData = Depends(get_current_active_user)):
     """
     Export research results as a markdown report.
     
@@ -356,15 +372,12 @@ async def export_report(question: str):
     Returns:
         Markdown report file
     """
-    if research_agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Research agent not initialized"
-        )
-    
     try:
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user)
+        
         # Get research results
-        result = research_agent.ask(question, per_sub_k=3)
+        result = user_research_agent.ask(question, per_sub_k=3)
         
         # Generate markdown report
         report = generate_markdown_report(result)
@@ -385,22 +398,19 @@ async def export_report(question: str):
         )
 
 @app.get("/stats")
-async def get_stats():
+async def get_stats(current_user: TokenData = Depends(get_current_active_user)):
     """Get statistics about the research agent."""
-    if research_agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Research agent not initialized"
-        )
-    
     try:
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user)
+        
         # Get collection stats
-        stats = research_agent.get_collection_stats()
+        stats = user_research_agent.get_collection_stats()
         
         return {
             "documents_in_database": stats.get("total_documents", 0),
             "agent_status": "active",
-            "database_type": "Chroma",
+            "database_type": "Postgres + pgvector",
             **stats
         }
         
@@ -424,10 +434,12 @@ async def upload_file(
     Returns:
         Upload result with processing information
     """
-    if research_agent is None:
+    global embedding_model
+    
+    if embedding_model is None:
         raise HTTPException(
             status_code=503,
-            detail="Research agent not initialized"
+            detail="Embedding model not initialized"
         )
     
     file_extension = Path(file.filename).suffix.lower()
@@ -449,29 +461,33 @@ async def upload_file(
                 detail="File too large. Maximum size is 50MB."
             )
 
-
-        with TemporaryDirectory() as tmp_dir:
-            temp_file = Path(tmp_dir) / file.filename
-            temp_file.write_bytes(file_content)
-
-            extracted_text = process_file(str(temp_file))
-            word_count = len(extracted_text.split())
-
-            result = add_file_to_index(file_content, file.filename)
-            if result.get("success"):
-                result.setdefault("word_count", word_count)
-
-        if result["success"]:
-            return FileUploadResponse(
-                success=True,
+        # Process and store the file using the new ingestion system
+        from auth.database import SessionLocal
+        db_session = SessionLocal()
+        
+        try:
+            result = process_and_store_file_content(
+                db_session=db_session,
+                user_id=current_user.user_id,
+                file_content=file_content,
                 filename=file.filename,
-                message=result["message"],
-                file_type=file_extension,
-                word_count=result.get("word_count", word_count),
-                chunks_added=result["chunks_added"]
+                model=embedding_model
             )
-        else:
-            raise HTTPException(status_code=400, detail=result["message"])
+            
+            if result["success"]:
+                return FileUploadResponse(
+                    success=True,
+                    filename=file.filename,
+                    message=result["message"],
+                    file_type=file_extension,
+                    word_count=result.get("word_count", 0),
+                    chunks_added=result["chunks_added"]
+                )
+            else:
+                raise HTTPException(status_code=400, detail=result["message"])
+                
+        finally:
+            db_session.close()
 
     except DocumentProcessingError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -484,7 +500,7 @@ async def upload_file(
         )
 
 @app.get("/collection-stats", response_model=CollectionStatsResponse)
-async def get_collection_stats_endpoint():
+async def get_collection_stats_endpoint(current_user: TokenData = Depends(get_current_active_user)):
     """
     Get detailed statistics about the document collection.
     
@@ -492,7 +508,11 @@ async def get_collection_stats_endpoint():
         Collection statistics including file types and counts
     """
     try:
-        stats = get_collection_stats()
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user)
+        
+        # Get collection stats
+        stats = user_research_agent.get_collection_stats()
         
         if "error" in stats:
             raise HTTPException(
@@ -617,32 +637,8 @@ async def change_model(request: ModelChangeRequest):
                 detail="Failed to set the new model"
             )
         
-        # Reinitialize the research agent with the new model
-        try:
-            # Load Chroma index
-            collection, model = load_index("chroma_db")
-            
-            # Initialize document retriever
-            retriever = DocumentRetriever(collection, model)
-            
-            # Initialize LLM client with new model
-            llm_client = None
-            if use_ollama and current_model:
-                llm_client = OllamaClient(model_name=current_model)
-                if not llm_client.is_available():
-                    print("Warning: New model not available, falling back to rule-based processing")
-                    llm_client = None
-            
-            # Reinitialize research agent
-            research_agent = ResearchAgent(retriever, llm_client, use_ollama, current_model)
-            
-        except Exception as e:
-            # Revert to old model if reinitialization fails
-            set_current_model(old_model)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to reinitialize research agent with new model: {str(e)}"
-            )
+        # Note: Research agents are now created per-request with user-scoped sessions
+        # No need to reinitialize global research agent
         
         return {
             "message": f"Model successfully changed to '{request.model_name}'",
@@ -674,16 +670,13 @@ async def chat_with_agent(
     Returns:
         Chat response with answer and conversation info
     """
-    if research_agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Research agent not initialized"
-        )
-    
     try:
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user)
+        
         # Create user-scoped conversation manager and chat agent
         conversation_manager = get_conversation_manager_for_user(current_user)
-        user_chat_agent = ChatAgent(research_agent, conversation_manager)
+        user_chat_agent = ChatAgent(user_research_agent, conversation_manager)
         
         # If selected text is provided, store it as a highlight
         if request.selected_text and request.conversation_id:
@@ -917,8 +910,8 @@ async def get_follow_up_suggestions(
 if __name__ == "__main__":
     import uvicorn
     
-    print("Starting Multi-hop Research Agent API (Modular Version)...")
-    print("Make sure you have built the Chroma index first using embeddings.py")
+    logging.info("Starting Multi-hop Research Agent API (Postgres Version)...")
+    logging.info("Make sure you have run the Alembic migration to create the embeddings table")
     
     uvicorn.run(
         "app:app",

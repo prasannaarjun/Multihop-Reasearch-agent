@@ -1,29 +1,34 @@
 """
 Document Retriever for Multi-hop Research Agent
-Handles document retrieval from Chroma database.
+Handles document retrieval from Postgres + pgvector database.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
+from sentence_transformers import SentenceTransformer
 from ..shared.interfaces import IRetriever
 from ..shared.exceptions import RetrievalError
+from embedding_storage import retrieve_similar_embeddings
 
 
 class DocumentRetriever(IRetriever):
     """
-    Document retriever that queries Chroma collection for relevant documents.
+    Document retriever that queries Postgres + pgvector for relevant documents.
     """
     
-    def __init__(self, collection, model):
+    def __init__(self, db_session: Session, model: SentenceTransformer, user_id: int):
         """
-        Initialize retriever with Chroma collection and embedding model.
+        Initialize retriever with database session and embedding model.
         
         Args:
-            collection: Chroma collection instance
-            model: Sentence transformer model
+            db_session: Database session for Postgres queries
+            model: Sentence transformer model for generating embeddings
+            user_id: User ID for multi-tenant isolation
         """
-        self.collection = collection
+        self.db_session = db_session
         self.model = model
-        print(f"Document retriever initialized with collection containing {self.collection.count()} documents")
+        self.user_id = user_id
+        print(f"Document retriever initialized for user {user_id}")
     
     def retrieve(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """
@@ -41,37 +46,39 @@ class DocumentRetriever(IRetriever):
         """
         try:
             # Generate query embedding
-            query_embedding = self.model.encode([query], normalize_embeddings=True)
+            query_embedding = self.model.encode([query], normalize_embeddings=True)[0]
             
-            # Query collection
-            results = self.collection.query(
-                query_embeddings=query_embedding,
-                n_results=top_k,
-                include=['documents', 'metadatas', 'distances']
+            # Query Postgres for similar embeddings
+            embedding_results = retrieve_similar_embeddings(
+                db_session=self.db_session,
+                user_id=self.user_id,
+                query_vector=query_embedding.tolist(),
+                k=top_k
             )
             
             # Format results
             formatted_results = []
-            if results['documents'] and results['documents'][0]:
-                for i, (doc, metadata, distance) in enumerate(zip(
-                    results['documents'][0],
-                    results['metadatas'][0],
-                    results['distances'][0]
-                )):
-                    # Convert distance to similarity score (1 - distance for cosine similarity)
-                    score = 1 - distance
-                    
-                    # Create snippet (first 200 chars)
-                    snippet = doc[:200] + "..." if len(doc) > 200 else doc
-                    
-                    formatted_results.append({
-                        'doc_id': results['ids'][0][i],
-                        'title': metadata.get('title', 'Unknown'),
-                        'snippet': snippet,
-                        'score': float(score),
-                        'filename': metadata.get('filename', 'Unknown'),
-                        'full_text': doc
-                    })
+            for result in embedding_results:
+                metadata = result.get('metadata', {})
+                
+                # Extract text content from metadata
+                text_content = metadata.get('text', '')
+                if not text_content:
+                    continue
+                
+                # Create snippet (first 200 chars)
+                snippet = text_content[:200] + "..." if len(text_content) > 200 else text_content
+                
+                formatted_results.append({
+                    'doc_id': result['id'],
+                    'title': metadata.get('title', 'Unknown'),
+                    'snippet': snippet,
+                    'score': result['similarity_score'],
+                    'filename': metadata.get('filename', 'Unknown'),
+                    'full_text': text_content,
+                    'message_id': result['message_id'],
+                    'chunk_index': metadata.get('chunk_index', 0)
+                })
             
             return formatted_results
             
@@ -86,24 +93,52 @@ class DocumentRetriever(IRetriever):
             Dictionary with collection statistics
         """
         try:
-            total_docs = self.collection.count()
+            from embedding_storage import get_embedding_stats
             
-            # Get sample of documents to analyze file types
-            sample_results = self.collection.get(limit=min(100, total_docs), include=['metadatas'])
-            file_types = {}
-            filenames = set()
+            # Get embedding statistics
+            stats = get_embedding_stats(self.db_session, self.user_id)
             
-            if sample_results['metadatas']:
-                for metadata in sample_results['metadatas']:
-                    file_type = metadata.get('file_type', 'unknown')
-                    file_types[file_type] = file_types.get(file_type, 0) + 1
-                    filenames.add(metadata.get('filename', 'unknown'))
+            if "error" in stats:
+                return {
+                    "error": stats["error"],
+                    "total_documents": 0,
+                    "unique_files": 0,
+                    "file_types": {},
+                    "collection_name": "postgres_embeddings"
+                }
+            
+            # Get file type distribution from metadata
+            from sqlalchemy import text
+            file_types_query = text("""
+                SELECT 
+                    embedding_metadata->>'file_type' as file_type,
+                    COUNT(*) as count
+                FROM embeddings 
+                WHERE user_id = :user_id 
+                AND embedding_metadata->>'file_type' IS NOT NULL
+                GROUP BY embedding_metadata->>'file_type'
+            """)
+            
+            result = self.db_session.execute(file_types_query, {"user_id": self.user_id})
+            file_types = {row.file_type: row.count for row in result}
+            
+            # Get unique filenames
+            filenames_query = text("""
+                SELECT DISTINCT embedding_metadata->>'filename' as filename
+                FROM embeddings 
+                WHERE user_id = :user_id 
+                AND embedding_metadata->>'filename' IS NOT NULL
+            """)
+            
+            result = self.db_session.execute(filenames_query, {"user_id": self.user_id})
+            unique_files = len([row.filename for row in result if row.filename])
             
             return {
-                "total_documents": total_docs,
-                "unique_files": len(filenames),
+                "total_documents": stats["total_embeddings"],
+                "unique_files": unique_files,
                 "file_types": file_types,
-                "collection_name": "research_documents"
+                "collection_name": "postgres_embeddings",
+                "embedding_dimension": stats["embedding_dimension"]
             }
             
         except Exception as e:
@@ -112,18 +147,25 @@ class DocumentRetriever(IRetriever):
                 "total_documents": 0,
                 "unique_files": 0,
                 "file_types": {},
-                "collection_name": "research_documents"
+                "collection_name": "postgres_embeddings"
             }
 
 
 if __name__ == "__main__":
     # Test the document retriever
-    from embeddings import load_index
+    from sentence_transformers import SentenceTransformer
+    from auth.database import SessionLocal
     
-    print("Loading index...")
+    print("Testing Postgres Document Retriever...")
     try:
-        collection, model = load_index("chroma_db")
-        retriever = DocumentRetriever(collection, model)
+        # Initialize database session
+        db_session = SessionLocal()
+        
+        # Load embedding model
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Create retriever (using user_id=1 for testing)
+        retriever = DocumentRetriever(db_session, model, user_id=1)
         
         # Test queries
         test_queries = [
@@ -146,6 +188,18 @@ if __name__ == "__main__":
                     print(f"   Snippet: {result['snippet']}")
             else:
                 print("No results found")
+        
+        # Test collection stats
+        print(f"\n{'='*50}")
+        print("Collection Stats:")
+        print('='*50)
+        stats = retriever.get_collection_stats()
+        print(f"Total documents: {stats.get('total_documents', 0)}")
+        print(f"Unique files: {stats.get('unique_files', 0)}")
+        print(f"File types: {stats.get('file_types', {})}")
                 
     except Exception as e:
         print(f"Error: {e}")
+    finally:
+        if 'db_session' in locals():
+            db_session.close()

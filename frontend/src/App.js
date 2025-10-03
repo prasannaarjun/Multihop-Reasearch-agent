@@ -34,7 +34,7 @@ function AppContent() {
       const status = await apiService.checkHealth();
       setAgentStatus(status);
       if (!status.agent_initialized) {
-        setError('Research agent not initialized. Please build the Chroma index first.');
+        setError('Research agent not initialized. Please upload some documents first.');
       }
     } catch (err) {
       setError('Cannot connect to the API server. Make sure the server is running.');
@@ -169,7 +169,7 @@ function AppContent() {
         </main>
 
         <footer>
-          <p>Powered by Chroma DB and FastAPI</p>
+          <p>Powered by Postgres + pgvector and FastAPI</p>
         </footer>
       </div>
     </div>

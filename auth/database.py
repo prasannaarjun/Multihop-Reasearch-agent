@@ -17,7 +17,7 @@ load_dotenv()
 # Database URL from environment variable
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://postgres:password@localhost:5432/research_agent_auth"
+    "postgresql://reagent:reagent@localhost:5432/reagentdb"
 )
 
 # Create engine
@@ -47,6 +47,9 @@ class User(Base):
     
     # Relationship to conversations - commented out for now due to import issues
     # conversations = relationship("ConversationDB", back_populates="user")
+    
+    # Relationship to embeddings
+    embeddings = relationship("EmbeddingDB", back_populates="user", cascade="all, delete-orphan")
 
 class UserSession(Base):
     """User session model for tracking active sessions"""
@@ -72,7 +75,7 @@ def get_db():
 def create_tables():
     """Create all tables in the database"""
     # Import the shared models to ensure they're registered with the Base
-    from agents.shared.models import ConversationDB, ChatMessageDB
+    from agents.shared.models import ConversationDB, ChatMessageDB, EmbeddingDB
     
     # Create all tables (all models now use the same Base)
     Base.metadata.create_all(bind=engine)

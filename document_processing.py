@@ -32,8 +32,6 @@ _DOC_CONVERTER: Optional[DocumentConverter] = None
 _DOC_CONVERTER_LOCK = threading.Lock()
 
 
-
-
 def process_file(file_path: str) -> str:
     """Process the document located at *file_path* and return extracted text."""
 

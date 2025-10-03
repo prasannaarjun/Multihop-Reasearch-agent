@@ -15,7 +15,7 @@ from .answer_synthesizer import AnswerSynthesizer
 
 class ResearchAgent(IAgent):
     """
-    Multi-hop research agent using Chroma for document retrieval.
+    Multi-hop research agent using Postgres + pgvector for document retrieval.
     """
     
     def __init__(self, retriever: IRetriever, llm_client: ILLMClient = None, 
@@ -176,15 +176,21 @@ class ResearchAgent(IAgent):
 
 if __name__ == "__main__":
     # Test the research agent
-    from embeddings import load_index
+    from sentence_transformers import SentenceTransformer
+    from auth.database import SessionLocal
     from ollama_client import OllamaClient
     
     print("Initializing research agent...")
     
     try:
-        # Load index
-        collection, model = load_index("chroma_db")
-        retriever = DocumentRetriever(collection, model)
+        # Initialize database session
+        db_session = SessionLocal()
+        
+        # Load embedding model
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Create retriever (using user_id=1 for testing)
+        retriever = DocumentRetriever(db_session, model, user_id=1)
         
         # Initialize LLM client (optional)
         llm_client = OllamaClient()
@@ -218,3 +224,6 @@ if __name__ == "__main__":
             
     except Exception as e:
         print(f"Error: {e}")
+    finally:
+        if 'db_session' in locals():
+            db_session.close()
