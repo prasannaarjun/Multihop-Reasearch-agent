@@ -452,3 +452,4 @@ The adaptive subquery generation system provides:
 
 The system intelligently adapts to question complexity, making the multihop reasoning pipeline more efficient and effective.
 
+
