@@ -2,6 +2,7 @@ import ollama
 import logging
 from typing import List, Dict, Any, Optional
 import json
+import re
 
 
 class OllamaClient:
@@ -85,35 +86,53 @@ class OllamaClient:
             logging.error(f"Error generating text: {e}")
             return f"Error: Could not generate text - {e}"
     
-    def generate_subqueries(self, question: str) -> List[str]:
+    def generate_subqueries(self, question: str, target_count: int = 5) -> List[str]:
         """
         Generate subqueries for a research question using LLM.
         
         Args:
             question: Main research question
+            target_count: Target number of subqueries to generate (default: 5)
             
         Returns:
             List of subqueries
         """
-        system_prompt = """You are a research assistant that breaks down complex questions into focused subqueries. 
-        Generate 3-5 specific subqueries that would help answer the main question comprehensively.
+        system_prompt = f"""You are a research assistant that breaks down complex questions into focused subqueries. 
+        Generate exactly {target_count} specific subqueries that would help answer the main question comprehensively.
         Each subquery should be a clear, focused question that can be answered by searching documents.
+        The subqueries should cover different aspects of the main question and be complementary.
         Return only the subqueries, one per line, without numbering or bullet points."""
         
-        prompt = f"Main question: {question}\n\nGenerate focused subqueries:"
+        prompt = f"Main question: {question}\n\nGenerate {target_count} focused subqueries:"
         
-        response = self.generate_text(prompt, system_prompt, max_tokens=500)
+        response = self.generate_text(prompt, system_prompt, max_tokens=800)
         
         # Parse response into list
         subqueries = [line.strip() for line in response.split('\n') if line.strip()]
         
-        # Fallback to original method if LLM fails
-        if not subqueries:
-            from agents.research.query_planner import QueryPlanner
-            planner = QueryPlanner()
-            subqueries = planner.generate_subqueries(question)
+        # Clean up any numbering that might have been added
+        cleaned_subqueries = []
+        for sq in subqueries:
+            # Remove leading numbers, bullets, dashes
+            cleaned = re.sub(r'^[\d\.\)\-\*\•]+\s*', '', sq).strip()
+            if cleaned and len(cleaned) > 5:  # Ensure it's a real question
+                cleaned_subqueries.append(cleaned)
         
-        return subqueries[:5]  # Limit to 5 subqueries
+        # If LLM fails or returns too few, create fallback
+        if len(cleaned_subqueries) < max(1, target_count // 2):
+            logger.warning(f"LLM generated only {len(cleaned_subqueries)} subqueries, expected {target_count}. Using fallback.")
+            # Simple fallback
+            key_terms = ' '.join([word for word in question.split() if len(word) > 3])[:50]
+            fallback = [
+                question,
+                f"What is {key_terms}?",
+                f"How does {key_terms} work?",
+                f"What are the applications of {key_terms}?",
+                f"What are the benefits and challenges of {key_terms}?",
+            ]
+            cleaned_subqueries.extend(fallback[len(cleaned_subqueries):target_count])
+        
+        return cleaned_subqueries[:target_count]
     
     def summarize_documents(self, documents: List[Dict[str, Any]], subquery: str) -> str:
         """
