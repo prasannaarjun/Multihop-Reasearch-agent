@@ -8,3 +8,4 @@ python embedding_manager.py
 echo.
 echo Press any key to exit...
 pause >nul
+
