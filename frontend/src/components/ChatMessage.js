@@ -1,4 +1,5 @@
 import React from 'react';
+import DOMPurify from 'dompurify';
 import './ChatMessage.css';
 
 const ChatMessage = ({ message, conversationId }) => {
@@ -9,10 +10,18 @@ const ChatMessage = ({ message, conversationId }) => {
 
   const formatContent = (content) => {
     // Simple markdown-like formatting
-    return content
+    const formatted = content
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/\n/g, '<br>');
+    
+    // Sanitize HTML to prevent XSS attacks
+    // Allow only safe tags and attributes
+    return DOMPurify.sanitize(formatted, {
+      ALLOWED_TAGS: ['strong', 'em', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li', 'code', 'pre'],
+      ALLOWED_ATTR: ['class'],
+      KEEP_CONTENT: true
+    });
   };
 
   const isUser = message.role === 'user';
@@ -38,6 +47,7 @@ const ChatMessage = ({ message, conversationId }) => {
         data-message-id={message.id}
         data-conversation-id={conversationMetaId || message.conversation_id || conversationId}
       >
+        {/* Content is sanitized via DOMPurify in formatContent() to prevent XSS */}
         <div 
           className="message-text"
           dangerouslySetInnerHTML={{ 

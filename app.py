@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 import os
@@ -34,7 +34,7 @@ from ollama_client import OllamaClient
 from sentence_transformers import SentenceTransformer
 
 # Authentication imports
-from auth import auth_router, get_current_active_user, TokenData
+from auth import auth_router, get_current_active_user, get_current_admin_user, TokenData
 from auth.database import create_tables
 
 # Global variables for agents
@@ -235,6 +235,22 @@ if os.path.exists("frontend/build"):
 class QuestionRequest(BaseModel):
     question: str
     per_sub_k: int = 3
+    
+    @field_validator('per_sub_k')
+    @classmethod
+    def validate_per_sub_k(cls, v):
+        if v < 1 or v > 20:
+            raise ValueError("per_sub_k must be between 1 and 20")
+        return v
+    
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Question cannot be empty")
+        if len(v) > 5000:
+            raise ValueError("Question is too long (maximum 5000 characters)")
+        return v.strip()
 
 class QuestionResponse(BaseModel):
     question: str
@@ -276,6 +292,29 @@ class ChatRequest(BaseModel):
     per_sub_k: int = 3
     include_context: bool = True
     selected_text: Optional[str] = None
+    
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Message cannot be empty")
+        if len(v) > 10000:
+            raise ValueError("Message is too long (maximum 10000 characters)")
+        return v.strip()
+    
+    @field_validator('per_sub_k')
+    @classmethod
+    def validate_per_sub_k(cls, v):
+        if v < 1 or v > 20:
+            raise ValueError("per_sub_k must be between 1 and 20")
+        return v
+    
+    @field_validator('selected_text')
+    @classmethod
+    def validate_selected_text(cls, v):
+        if v and len(v) > 5000:
+            raise ValueError("Selected text is too long (maximum 5000 characters)")
+        return v
 
 class ChatResponseModel(BaseModel):
     conversation_id: str
@@ -306,22 +345,21 @@ async def root():
     """Serve React app or API information."""
     if os.path.exists("frontend/build/index.html"):
         return FileResponse("frontend/build/index.html")
+    # Minimal info to prevent information disclosure
     return {
         "message": "Multi-hop Research Agent API",
         "version": "1.0.0",
-        "status": "running",
-        "embedding_model_initialized": embedding_model is not None,
-        "database_type": "Postgres + pgvector"
+        "status": "running"
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """
+    Health check endpoint for monitoring and load balancers.
+    Minimal information to prevent information disclosure.
+    """
     return {
-        "status": "healthy",
-        "agent_initialized": embedding_model is not None,
-        "embedding_model_initialized": embedding_model is not None,
-        "database_type": "Postgres + pgvector"
+        "status": "healthy"
     }
 
 @app.post("/ask", response_model=QuestionResponse)
@@ -461,6 +499,8 @@ async def upload_file(
     Returns:
         Upload result with processing information
     """
+    from auth.validators import validate_file_upload_size, sanitize_string
+    
     global embedding_model
     
     if embedding_model is None:
@@ -469,7 +509,15 @@ async def upload_file(
             detail="Embedding model not initialized"
         )
     
-    file_extension = Path(file.filename).suffix.lower()
+    # Validate and sanitize filename
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    sanitized_filename = sanitize_string(file.filename, max_length=255)
+    if not sanitized_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    file_extension = Path(sanitized_filename).suffix.lower()
     if file_extension not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -478,15 +526,12 @@ async def upload_file(
 
     try:
         file_content = await file.read()
-        if not file_content:
-            raise HTTPException(status_code=400, detail="Empty file uploaded")
-
-        max_size = 50 * 1024 * 1024
-        if len(file_content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail="File too large. Maximum size is 50MB."
-            )
+        
+        # Validate file size
+        try:
+            validate_file_upload_size(len(file_content), max_size_mb=50)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # Process and store the file using the new ingestion system
         from auth.database import SessionLocal
@@ -498,14 +543,14 @@ async def upload_file(
                 db_session=db_session,
                 user_id=current_user.user_id,
                 file_content=file_content,
-                filename=file.filename,
+                filename=sanitized_filename,
                 model=embedding_model
             )
             
             if result["success"]:
                 return FileUploadResponse(
                     success=True,
-                    filename=file.filename,
+                    filename=sanitized_filename,
                     message=result["message"],
                     file_type=file_extension,
                     word_count=result.get("word_count", 0),
@@ -572,12 +617,20 @@ async def get_collection_stats_endpoint(current_user: TokenData = Depends(get_cu
             db_session.close()
 
 @app.get("/supported-file-types")
-async def get_supported_file_types():
+async def get_supported_file_types(
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
-    Get list of supported file types for upload.
+    Get list of supported file types for upload (authentication required).
     
+    Args:
+        current_user: Current authenticated user
+        
     Returns:
         List of supported file extensions
+        
+    Requires:
+        User authentication
     """
     return {
         "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
@@ -585,12 +638,20 @@ async def get_supported_file_types():
     }
 
 @app.get("/models")
-async def get_available_models():
+async def get_available_models(
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
-    Get list of available models from Ollama.
+    Get list of available models from Ollama (authentication required).
     
+    Args:
+        current_user: Current authenticated user
+        
     Returns:
         List of available models with their details
+        
+    Requires:
+        User authentication
     """
     try:
         # Check if Ollama is enabled
@@ -629,15 +690,22 @@ class ModelChangeRequest(BaseModel):
     model_name: str
 
 @app.post("/models/change")
-async def change_model(request: ModelChangeRequest):
+async def change_model(
+    request: ModelChangeRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
     """
-    Change the current model for the research agent.
+    Change the current model for the research agent (admin only).
     
     Args:
         request: Model change request with model_name
+        current_user: Current authenticated admin user
         
     Returns:
         Success message and new model info
+        
+    Requires:
+        Admin authentication
     """
     global current_model, research_agent
     
@@ -854,14 +922,23 @@ async def create_conversation(
     Returns:
         Conversation ID
     """
+    from auth.validators import validate_conversation_title, sanitize_string
     from auth.database import SessionLocal
+    
+    # Validate and sanitize title
+    try:
+        sanitized_title = sanitize_string(request.title, max_length=255)
+        validate_conversation_title(sanitized_title)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     db_session = None
     
     try:
         db_session = SessionLocal()
         conversation_manager = get_conversation_manager_for_user(current_user, db_session)
-        conversation_id = conversation_manager.create_conversation(request.title)
-        return {"conversation_id": conversation_id, "title": request.title}
+        conversation_id = conversation_manager.create_conversation(sanitized_title)
+        return {"conversation_id": conversation_id, "title": sanitized_title}
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -887,13 +964,22 @@ async def update_conversation_title(
     Returns:
         Success message
     """
+    from auth.validators import validate_conversation_title, sanitize_string
     from auth.database import SessionLocal
+    
+    # Validate and sanitize title
+    try:
+        sanitized_title = sanitize_string(request.title, max_length=255)
+        validate_conversation_title(sanitized_title)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     db_session = None
     
     try:
         db_session = SessionLocal()
         conversation_manager = get_conversation_manager_for_user(current_user, db_session)
-        success = conversation_manager.update_conversation_title(conversation_id, request.title)
+        success = conversation_manager.update_conversation_title(conversation_id, sanitized_title)
         if not success:
             raise HTTPException(
                 status_code=404,

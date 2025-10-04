@@ -52,13 +52,7 @@ const ModelSelector = ({ currentModel, onModelChange, disabled = false }) => {
       console.log('ModelSelector unmounting');
       modelsLoadedRef.current = false;
     };
-  }, []); // Empty dependency array - only run on mount
-
-  // Add a refresh function for manual refresh if needed
-  const refreshModels = useCallback(() => {
-    modelsLoadedRef.current = false;
-    loadModels();
-  }, [loadModels]);
+  }, [loadModels]); // Include loadModels in dependency array
 
   const handleModelSelect = async (modelName) => {
     if (modelName === currentModel || disabled) return;
