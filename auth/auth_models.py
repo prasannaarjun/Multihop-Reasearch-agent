@@ -2,37 +2,60 @@
 Pydantic models for authentication API
 """
 
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
 from typing import Optional
 from datetime import datetime
-import re
+from .validators import (
+    validate_username, validate_password, validate_email,
+    validate_full_name, ValidationError as ValidatorError
+)
 
 class UserBase(BaseModel):
     """Base user model"""
     username: str
     email: EmailStr
     
-    @validator('username')
-    def validate_username(cls, v):
-        if len(v) < 3:
-            raise ValueError('Username must be at least 3 characters long')
-        if len(v) > 50:
-            raise ValueError('Username must be less than 50 characters')
-        if not re.match(r'^[a-zA-Z0-9_]+$', v):
-            raise ValueError('Username must contain only alphanumeric characters and underscores')
-        return v.lower()
+    @field_validator('username')
+    @classmethod
+    def validate_username_field(cls, v):
+        try:
+            validate_username(v)
+            return v.lower()
+        except ValidatorError as e:
+            raise ValueError(str(e))
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email_field(cls, v):
+        try:
+            # EmailStr already validates format, but add our additional checks
+            validate_email(str(v))
+            return v
+        except ValidatorError as e:
+            raise ValueError(str(e))
 
 class UserCreate(UserBase):
     """User creation model"""
     password: str
     full_name: Optional[str] = None
     
-    @validator('password')
-    def validate_password(cls, v):
-        if len(v) < 6:
-            raise ValueError('Password must be at least 6 characters long')
-        if len(v) > 128:
-            raise ValueError('Password must be less than 128 characters')
+    @field_validator('password')
+    @classmethod
+    def validate_password_field(cls, v):
+        try:
+            validate_password(v)
+            return v
+        except ValidatorError as e:
+            raise ValueError(str(e))
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name_field(cls, v):
+        if v is not None:
+            try:
+                validate_full_name(v)
+            except ValidatorError as e:
+                raise ValueError(str(e))
         return v
 
 class UserLogin(BaseModel):
@@ -50,8 +73,7 @@ class UserResponse(UserBase):
     last_login: Optional[datetime] = None
     full_name: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     """Token response model"""
@@ -71,13 +93,14 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_new_password(cls, v):
-        if len(v) < 6:
-            raise ValueError('New password must be at least 6 characters long')
-        if len(v) > 128:
-            raise ValueError('New password must be less than 128 characters')
-        return v
+        try:
+            validate_password(v)
+            return v
+        except ValidatorError as e:
+            raise ValueError(str(e))
 
 class UserUpdate(BaseModel):
     """User update model"""
@@ -93,5 +116,4 @@ class SessionInfo(BaseModel):
     user_agent: Optional[str] = None
     is_active: bool
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

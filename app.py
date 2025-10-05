@@ -5,15 +5,17 @@ Updated to use the new modular agent architecture.
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 import os
 import warnings
 import logging
 import threading
+import json
+import uuid
 from pathlib import Path
 
 # Suppress bcrypt version warning
@@ -34,7 +36,7 @@ from ollama_client import OllamaClient
 from sentence_transformers import SentenceTransformer
 
 # Authentication imports
-from auth import auth_router, get_current_active_user, TokenData
+from auth import auth_router, get_current_active_user, get_current_admin_user, TokenData
 from auth.database import create_tables
 
 # Global variables for agents
@@ -235,6 +237,22 @@ if os.path.exists("frontend/build"):
 class QuestionRequest(BaseModel):
     question: str
     per_sub_k: int = 3
+    
+    @field_validator('per_sub_k')
+    @classmethod
+    def validate_per_sub_k(cls, v):
+        if v < 1 or v > 20:
+            raise ValueError("per_sub_k must be between 1 and 20")
+        return v
+    
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Question cannot be empty")
+        if len(v) > 5000:
+            raise ValueError("Question is too long (maximum 5000 characters)")
+        return v.strip()
 
 class QuestionResponse(BaseModel):
     question: str
@@ -276,6 +294,29 @@ class ChatRequest(BaseModel):
     per_sub_k: int = 3
     include_context: bool = True
     selected_text: Optional[str] = None
+    
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Message cannot be empty")
+        if len(v) > 10000:
+            raise ValueError("Message is too long (maximum 10000 characters)")
+        return v.strip()
+    
+    @field_validator('per_sub_k')
+    @classmethod
+    def validate_per_sub_k(cls, v):
+        if v < 1 or v > 20:
+            raise ValueError("per_sub_k must be between 1 and 20")
+        return v
+    
+    @field_validator('selected_text')
+    @classmethod
+    def validate_selected_text(cls, v):
+        if v and len(v) > 5000:
+            raise ValueError("Selected text is too long (maximum 5000 characters)")
+        return v
 
 class ChatResponseModel(BaseModel):
     conversation_id: str
@@ -306,22 +347,21 @@ async def root():
     """Serve React app or API information."""
     if os.path.exists("frontend/build/index.html"):
         return FileResponse("frontend/build/index.html")
+    # Minimal info to prevent information disclosure
     return {
         "message": "Multi-hop Research Agent API",
         "version": "1.0.0",
-        "status": "running",
-        "embedding_model_initialized": embedding_model is not None,
-        "database_type": "Postgres + pgvector"
+        "status": "running"
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """
+    Health check endpoint for monitoring and load balancers.
+    Minimal information to prevent information disclosure.
+    """
     return {
-        "status": "healthy",
-        "agent_initialized": embedding_model is not None,
-        "embedding_model_initialized": embedding_model is not None,
-        "database_type": "Postgres + pgvector"
+        "status": "healthy"
     }
 
 @app.post("/ask", response_model=QuestionResponse)
@@ -461,6 +501,8 @@ async def upload_file(
     Returns:
         Upload result with processing information
     """
+    from auth.validators import validate_file_upload_size, sanitize_string
+    
     global embedding_model
     
     if embedding_model is None:
@@ -469,7 +511,15 @@ async def upload_file(
             detail="Embedding model not initialized"
         )
     
-    file_extension = Path(file.filename).suffix.lower()
+    # Validate and sanitize filename
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    sanitized_filename = sanitize_string(file.filename, max_length=255)
+    if not sanitized_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    file_extension = Path(sanitized_filename).suffix.lower()
     if file_extension not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -478,15 +528,12 @@ async def upload_file(
 
     try:
         file_content = await file.read()
-        if not file_content:
-            raise HTTPException(status_code=400, detail="Empty file uploaded")
-
-        max_size = 50 * 1024 * 1024
-        if len(file_content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail="File too large. Maximum size is 50MB."
-            )
+        
+        # Validate file size
+        try:
+            validate_file_upload_size(len(file_content), max_size_mb=50)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # Process and store the file using the new ingestion system
         from auth.database import SessionLocal
@@ -498,14 +545,14 @@ async def upload_file(
                 db_session=db_session,
                 user_id=current_user.user_id,
                 file_content=file_content,
-                filename=file.filename,
+                filename=sanitized_filename,
                 model=embedding_model
             )
             
             if result["success"]:
                 return FileUploadResponse(
                     success=True,
-                    filename=file.filename,
+                    filename=sanitized_filename,
                     message=result["message"],
                     file_type=file_extension,
                     word_count=result.get("word_count", 0),
@@ -572,12 +619,20 @@ async def get_collection_stats_endpoint(current_user: TokenData = Depends(get_cu
             db_session.close()
 
 @app.get("/supported-file-types")
-async def get_supported_file_types():
+async def get_supported_file_types(
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
-    Get list of supported file types for upload.
+    Get list of supported file types for upload (authentication required).
     
+    Args:
+        current_user: Current authenticated user
+        
     Returns:
         List of supported file extensions
+        
+    Requires:
+        User authentication
     """
     return {
         "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
@@ -585,12 +640,20 @@ async def get_supported_file_types():
     }
 
 @app.get("/models")
-async def get_available_models():
+async def get_available_models(
+    current_user: TokenData = Depends(get_current_active_user)
+):
     """
-    Get list of available models from Ollama.
+    Get list of available models from Ollama (authentication required).
     
+    Args:
+        current_user: Current authenticated user
+        
     Returns:
         List of available models with their details
+        
+    Requires:
+        User authentication
     """
     try:
         # Check if Ollama is enabled
@@ -629,15 +692,22 @@ class ModelChangeRequest(BaseModel):
     model_name: str
 
 @app.post("/models/change")
-async def change_model(request: ModelChangeRequest):
+async def change_model(
+    request: ModelChangeRequest,
+    current_user: TokenData = Depends(get_current_admin_user)
+):
     """
-    Change the current model for the research agent.
+    Change the current model for the research agent (admin only).
     
     Args:
         request: Model change request with model_name
+        current_user: Current authenticated admin user
         
     Returns:
         Success message and new model info
+        
+    Requires:
+        Admin authentication
     """
     global current_model, research_agent
     
@@ -764,6 +834,145 @@ async def chat_with_agent(
         if db_session:
             db_session.close()
 
+@app.post("/chat/stream")
+async def chat_with_agent_streaming(
+    request: ChatRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """
+    Chat with the research agent with streaming response.
+    
+    Args:
+        request: Chat request with message and optional conversation_id
+        
+    Returns:
+        Streaming response with answer chunks
+    """
+    from auth.database import SessionLocal
+    from agents.shared.streaming_controller import streaming_manager
+    db_session = None
+    
+    try:
+        db_session = SessionLocal()
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
+        
+        # Create user-scoped conversation manager and chat agent
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
+        user_chat_agent = ChatAgent(user_research_agent, conversation_manager)
+        
+        # Create streaming controller
+        request_id = str(uuid.uuid4())
+        controller = streaming_manager.create_controller(request_id)
+        
+        # If selected text is provided, store it as a highlight
+        if request.selected_text and request.conversation_id:
+            conversation_manager.add_highlight(request.conversation_id, request.selected_text)
+        
+        # Create enhanced message with highlight context if selected text is provided
+        enhanced_message = request.message
+        if request.selected_text:
+            enhanced_message = f"""[Context from user highlight]:
+"{request.selected_text}"
+
+[User question]:
+"{request.message}" """
+        
+        def generate_streaming_response():
+            try:
+                # Process the request with streaming
+                for chunk in user_chat_agent.process_streaming(
+                    message=enhanced_message,
+                    conversation_id=request.conversation_id,
+                    per_sub_k=request.per_sub_k,
+                    include_context=request.include_context,
+                    stop_flag=controller.stop_flag
+                ):
+                    if controller.is_stopped():
+                        break
+                    
+                    # Yield chunk as JSON - ensure chunk is properly escaped
+                    try:
+                        chunk_data = {
+                            'chunk': chunk,
+                            'request_id': request_id, 
+                            'type': 'content'
+                        }
+                        json_data = json.dumps(chunk_data, ensure_ascii=False)
+                        yield f"data: {json_data}\n\n"
+                    except (TypeError, ValueError) as e:
+                        # Fallback: escape the chunk manually if JSON serialization fails
+                        escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+                        yield f"data: {{\"chunk\": \"{escaped_chunk}\", \"request_id\": \"{request_id}\", \"type\": \"content\"}}\n\n"
+                
+                # Get the final conversation to extract metadata
+                final_conversation = conversation_manager.get_conversation(request.conversation_id)
+                research_metadata = {}
+                if final_conversation and final_conversation.messages:
+                    last_message = final_conversation.messages[-1]
+                    if last_message.role == 'assistant' and last_message.metadata:
+                        research_metadata = {
+                            'research_result': last_message.metadata.get('research_result', {}),
+                            'subqueries': last_message.metadata.get('subqueries', []),
+                            'citations_count': last_message.metadata.get('citations_count', 0),
+                            'total_documents': last_message.metadata.get('total_documents', 0)
+                        }
+                
+                # Send completion signal with metadata
+                completion_data = {
+                    'request_id': request_id, 
+                    'type': 'complete',
+                    'conversation_id': request.conversation_id,
+                    'message_count': len(final_conversation.messages) if final_conversation else 1,
+                    **research_metadata
+                }
+                try:
+                    json_data = json.dumps(completion_data, ensure_ascii=False)
+                    yield f"data: {json_data}\n\n"
+                except (TypeError, ValueError) as e:
+                    # Fallback for completion data
+                    yield f"data: {{\"request_id\": \"{request_id}\", \"type\": \"complete\", \"conversation_id\": \"{request.conversation_id}\"}}\n\n"
+                
+            except Exception as e:
+                error_data = {'type': 'error', 'error': str(e), 'request_id': request_id}
+                try:
+                    json_data = json.dumps(error_data, ensure_ascii=False)
+                    yield f"data: {json_data}\n\n"
+                except (TypeError, ValueError):
+                    # Fallback for error data
+                    escaped_error = str(e).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+                    yield f"data: {{\"type\": \"error\", \"error\": \"{escaped_error}\", \"request_id\": \"{request_id}\"}}\n\n"
+            finally:
+                # Clean up controller
+                streaming_manager.remove_controller(request_id)
+                if db_session:
+                    db_session.close()
+        
+        return StreamingResponse(
+            generate_streaming_response(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Request-ID": request_id
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing streaming chat: {str(e)}")
+
+@app.post("/chat/stream/stop")
+async def stop_streaming(request_id: str):
+    """Stop a streaming operation."""
+    from agents.shared.streaming_controller import streaming_manager
+    
+    success = streaming_manager.stop_controller(request_id)
+    if success:
+        return {"status": "stopped", "request_id": request_id}
+    else:
+        return {"status": "not_found", "request_id": request_id}
+
 @app.get("/conversations", response_model=List[ConversationInfo])
 async def list_conversations(
     current_user: TokenData = Depends(get_current_active_user)
@@ -854,14 +1063,23 @@ async def create_conversation(
     Returns:
         Conversation ID
     """
+    from auth.validators import validate_conversation_title, sanitize_string
     from auth.database import SessionLocal
+    
+    # Validate and sanitize title
+    try:
+        sanitized_title = sanitize_string(request.title, max_length=255)
+        validate_conversation_title(sanitized_title)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     db_session = None
     
     try:
         db_session = SessionLocal()
         conversation_manager = get_conversation_manager_for_user(current_user, db_session)
-        conversation_id = conversation_manager.create_conversation(request.title)
-        return {"conversation_id": conversation_id, "title": request.title}
+        conversation_id = conversation_manager.create_conversation(sanitized_title)
+        return {"conversation_id": conversation_id, "title": sanitized_title}
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -887,13 +1105,22 @@ async def update_conversation_title(
     Returns:
         Success message
     """
+    from auth.validators import validate_conversation_title, sanitize_string
     from auth.database import SessionLocal
+    
+    # Validate and sanitize title
+    try:
+        sanitized_title = sanitize_string(request.title, max_length=255)
+        validate_conversation_title(sanitized_title)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     db_session = None
     
     try:
         db_session = SessionLocal()
         conversation_manager = get_conversation_manager_for_user(current_user, db_session)
-        success = conversation_manager.update_conversation_title(conversation_id, request.title)
+        success = conversation_manager.update_conversation_title(conversation_id, sanitized_title)
         if not success:
             raise HTTPException(
                 status_code=404,

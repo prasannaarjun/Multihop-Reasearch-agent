@@ -3,6 +3,7 @@ Authentication service with JWT handling and user management
 """
 
 import os
+import logging
 import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
@@ -34,21 +35,38 @@ class AuthService:
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
-        # Ensure password is not longer than 72 bytes (bcrypt limit)
-        if len(plain_password.encode('utf-8')) > 72:
-            plain_password = plain_password[:72]
         try:
-            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+            # bcrypt has a 72-byte limit, but we handle this during password creation
+            # For verification, we need to truncate to match what was stored
+            password_bytes = plain_password.encode('utf-8')
+            if len(password_bytes) > 72:
+                password_bytes = password_bytes[:72]
+            return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
         except Exception:
             return False
     
     def get_password_hash(self, password: str) -> str:
-        """Hash a password"""
-        # Ensure password is not longer than 72 bytes (bcrypt limit)
-        if len(password.encode('utf-8')) > 72:
-            password = password[:72]
+        """
+        Hash a password using bcrypt.
+        
+        Args:
+            password: Password to hash
+            
+        Returns:
+            Hashed password
+            
+        Raises:
+            ValueError: If password exceeds 72 bytes (bcrypt limit)
+        """
+        password_bytes = password.encode('utf-8')
+        # bcrypt has a 72-byte limit - reject passwords that are too long
+        if len(password_bytes) > 72:
+            raise ValueError(
+                "Password is too long. Maximum length is 72 bytes. "
+                "Please use a shorter password or consider using a passphrase."
+            )
         salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
-        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+        return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
     
     def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
         """Create a JWT access token"""
@@ -70,15 +88,31 @@ class AuthService:
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
     
-    def verify_token(self, token: str) -> Optional[TokenData]:
-        """Verify and decode a JWT token"""
+    def verify_token(self, token: str, expected_type: str = "access") -> Optional[TokenData]:
+        """
+        Verify and decode a JWT token.
+        
+        Args:
+            token: JWT token to verify
+            expected_type: Expected token type ("access" or "refresh")
+            
+        Returns:
+            TokenData if valid, None otherwise
+        """
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             email: str = payload.get("sub")
             user_id: int = payload.get("user_id")
             is_admin: bool = payload.get("is_admin", False)
+            token_type: str = payload.get("type")
             
+            # Validate required fields
             if email is None or user_id is None:
+                return None
+            
+            # Validate token type to prevent token confusion attacks
+            if token_type != expected_type:
+                logging.warning(f"Token type mismatch: expected {expected_type}, got {token_type}")
                 return None
                 
             return TokenData(email=email, user_id=user_id, is_admin=is_admin)
@@ -175,7 +209,8 @@ class AuthService:
     
     def refresh_access_token(self, refresh_token: str) -> Optional[Token]:
         """Refresh access token using refresh token"""
-        token_data = self.verify_token(refresh_token)
+        # Verify this is actually a refresh token, not an access token
+        token_data = self.verify_token(refresh_token, expected_type="refresh")
         if not token_data or not token_data.user_id:
             return None
         

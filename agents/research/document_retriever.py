@@ -5,7 +5,7 @@ Handles document retrieval from Postgres + pgvector database.
 
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from sentence_transformers import SentenceTransformer
 from ..shared.interfaces import IRetriever
 from ..shared.exceptions import RetrievalError
@@ -109,31 +109,28 @@ class DocumentRetriever(IRetriever):
                     "collection_name": "postgres_embeddings"
                 }
             
-            # Get file type distribution from metadata using ORM
-            file_types_result = self.db_session.query(
-                func.json_extract_path_text(EmbeddingDB.embedding_metadata, 'file_type').label('file_type'),
-                func.count().label('count')
-            ).filter(
-                and_(
-                    EmbeddingDB.user_id == self.user_id,
-                    func.json_extract_path_text(EmbeddingDB.embedding_metadata, 'file_type').isnot(None)
-                )
-            ).group_by(
-                func.json_extract_path_text(EmbeddingDB.embedding_metadata, 'file_type')
-            ).all()
-            
+            # Get file type distribution from metadata using JSONB operators
+            # Use raw SQL with text() for JSONB ->> operator
+            file_types_query = text("""
+                SELECT 
+                    embedding_metadata->>'file_type' as file_type,
+                    COUNT(*) as count
+                FROM embeddings 
+                WHERE user_id = :user_id 
+                AND embedding_metadata->>'file_type' IS NOT NULL
+                GROUP BY embedding_metadata->>'file_type'
+            """)
+            file_types_result = self.db_session.execute(file_types_query, {"user_id": self.user_id})
             file_types = {row.file_type: row.count for row in file_types_result if row.file_type}
             
-            # Get unique filenames using ORM
-            filenames_result = self.db_session.query(
-                func.json_extract_path_text(EmbeddingDB.embedding_metadata, 'filename').label('filename')
-            ).filter(
-                and_(
-                    EmbeddingDB.user_id == self.user_id,
-                    func.json_extract_path_text(EmbeddingDB.embedding_metadata, 'filename').isnot(None)
-                )
-            ).distinct().all()
-            
+            # Get unique filenames using JSONB operators
+            filenames_query = text("""
+                SELECT DISTINCT embedding_metadata->>'filename' as filename
+                FROM embeddings 
+                WHERE user_id = :user_id 
+                AND embedding_metadata->>'filename' IS NOT NULL
+            """)
+            filenames_result = self.db_session.execute(filenames_query, {"user_id": self.user_id})
             unique_files = len([row.filename for row in filenames_result if row.filename])
             
             return {

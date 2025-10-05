@@ -3,8 +3,9 @@ Answer Synthesizer for Multi-hop Research Agent
 Handles answer synthesis from subquery results.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
 import re
+import threading
 from ..shared.interfaces import IAnswerSynthesizer, ILLMClient
 from ..shared.models import SubqueryResult
 
@@ -90,6 +91,55 @@ Provide a comprehensive answer that synthesizes all the research findings:"""
         synthesis_parts.append("\nThis information is synthesized from multiple sources to provide a comprehensive answer.")
         
         return "".join(synthesis_parts)
+    
+    def synthesize_answer_streaming(self, question: str, subquery_results: List[Dict[str, Any]], 
+                                  stop_flag: threading.Event = None) -> Generator[str, None, None]:
+        """
+        Synthesize final answer from subquery results with streaming.
+        
+        Args:
+            question: Original research question
+            subquery_results: Results from each subquery
+            stop_flag: Threading event to signal stop
+            
+        Yields:
+            Answer chunks as they are generated
+        """
+        if self.use_llm:
+            yield from self._synthesize_with_llm_streaming(question, subquery_results, stop_flag)
+        else:
+            # For rule-based, yield the complete answer at once
+            answer = self._synthesize_rule_based(question, subquery_results)
+            yield answer
+    
+    def _synthesize_with_llm_streaming(self, question: str, subquery_results: List[Dict[str, Any]], 
+                                     stop_flag: threading.Event = None) -> Generator[str, None, None]:
+        """Synthesize answer using LLM with streaming."""
+        # Prepare subquery summaries (same as before)
+        subquery_texts = []
+        for i, result in enumerate(subquery_results, 1):
+            if hasattr(result, 'summary') and result.summary and result.summary != "No relevant information found for this aspect.":
+                subquery_texts.append(f"Research Area {i}: {result.subquery}\n{result.summary}")
+        
+        if not subquery_texts:
+            yield "I apologize, but I encountered errors while researching your question and couldn't retrieve relevant information. Please try rephrasing your question or check if the knowledge base is accessible."
+            return
+        
+        system_prompt = """You are a research assistant that synthesizes information from multiple sources.
+        Create a comprehensive, well-structured answer that addresses the main question.
+        Use information from all the research areas provided.
+        Structure your answer clearly and provide a coherent narrative.
+        Be thorough but concise."""
+        
+        prompt = f"""Main Question: {question}
+
+Research Findings:
+{chr(10).join(subquery_texts)}
+
+Provide a comprehensive answer that synthesizes all the research findings:"""
+        
+        # Stream the LLM response
+        yield from self.llm_client.generate_text_streaming(prompt, system_prompt, max_tokens=1500, stop_flag=stop_flag)
     
     def summarize_documents(self, documents: List[Dict[str, Any]], subquery: str) -> str:
         """
