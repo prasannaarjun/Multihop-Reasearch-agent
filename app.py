@@ -5,7 +5,7 @@ Updated to use the new modular agent architecture.
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, Optional, List
@@ -14,6 +14,8 @@ import os
 import warnings
 import logging
 import threading
+import json
+import uuid
 from pathlib import Path
 
 # Suppress bcrypt version warning
@@ -831,6 +833,145 @@ async def chat_with_agent(
     finally:
         if db_session:
             db_session.close()
+
+@app.post("/chat/stream")
+async def chat_with_agent_streaming(
+    request: ChatRequest,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """
+    Chat with the research agent with streaming response.
+    
+    Args:
+        request: Chat request with message and optional conversation_id
+        
+    Returns:
+        Streaming response with answer chunks
+    """
+    from auth.database import SessionLocal
+    from agents.shared.streaming_controller import streaming_manager
+    db_session = None
+    
+    try:
+        db_session = SessionLocal()
+        # Get user-scoped research agent
+        user_research_agent = get_research_agent_for_user(current_user, db_session)
+        
+        # Create user-scoped conversation manager and chat agent
+        conversation_manager = get_conversation_manager_for_user(current_user, db_session)
+        user_chat_agent = ChatAgent(user_research_agent, conversation_manager)
+        
+        # Create streaming controller
+        request_id = str(uuid.uuid4())
+        controller = streaming_manager.create_controller(request_id)
+        
+        # If selected text is provided, store it as a highlight
+        if request.selected_text and request.conversation_id:
+            conversation_manager.add_highlight(request.conversation_id, request.selected_text)
+        
+        # Create enhanced message with highlight context if selected text is provided
+        enhanced_message = request.message
+        if request.selected_text:
+            enhanced_message = f"""[Context from user highlight]:
+"{request.selected_text}"
+
+[User question]:
+"{request.message}" """
+        
+        def generate_streaming_response():
+            try:
+                # Process the request with streaming
+                for chunk in user_chat_agent.process_streaming(
+                    message=enhanced_message,
+                    conversation_id=request.conversation_id,
+                    per_sub_k=request.per_sub_k,
+                    include_context=request.include_context,
+                    stop_flag=controller.stop_flag
+                ):
+                    if controller.is_stopped():
+                        break
+                    
+                    # Yield chunk as JSON - ensure chunk is properly escaped
+                    try:
+                        chunk_data = {
+                            'chunk': chunk,
+                            'request_id': request_id, 
+                            'type': 'content'
+                        }
+                        json_data = json.dumps(chunk_data, ensure_ascii=False)
+                        yield f"data: {json_data}\n\n"
+                    except (TypeError, ValueError) as e:
+                        # Fallback: escape the chunk manually if JSON serialization fails
+                        escaped_chunk = chunk.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+                        yield f"data: {{\"chunk\": \"{escaped_chunk}\", \"request_id\": \"{request_id}\", \"type\": \"content\"}}\n\n"
+                
+                # Get the final conversation to extract metadata
+                final_conversation = conversation_manager.get_conversation(request.conversation_id)
+                research_metadata = {}
+                if final_conversation and final_conversation.messages:
+                    last_message = final_conversation.messages[-1]
+                    if last_message.role == 'assistant' and last_message.metadata:
+                        research_metadata = {
+                            'research_result': last_message.metadata.get('research_result', {}),
+                            'subqueries': last_message.metadata.get('subqueries', []),
+                            'citations_count': last_message.metadata.get('citations_count', 0),
+                            'total_documents': last_message.metadata.get('total_documents', 0)
+                        }
+                
+                # Send completion signal with metadata
+                completion_data = {
+                    'request_id': request_id, 
+                    'type': 'complete',
+                    'conversation_id': request.conversation_id,
+                    'message_count': len(final_conversation.messages) if final_conversation else 1,
+                    **research_metadata
+                }
+                try:
+                    json_data = json.dumps(completion_data, ensure_ascii=False)
+                    yield f"data: {json_data}\n\n"
+                except (TypeError, ValueError) as e:
+                    # Fallback for completion data
+                    yield f"data: {{\"request_id\": \"{request_id}\", \"type\": \"complete\", \"conversation_id\": \"{request.conversation_id}\"}}\n\n"
+                
+            except Exception as e:
+                error_data = {'type': 'error', 'error': str(e), 'request_id': request_id}
+                try:
+                    json_data = json.dumps(error_data, ensure_ascii=False)
+                    yield f"data: {json_data}\n\n"
+                except (TypeError, ValueError):
+                    # Fallback for error data
+                    escaped_error = str(e).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+                    yield f"data: {{\"type\": \"error\", \"error\": \"{escaped_error}\", \"request_id\": \"{request_id}\"}}\n\n"
+            finally:
+                # Clean up controller
+                streaming_manager.remove_controller(request_id)
+                if db_session:
+                    db_session.close()
+        
+        return StreamingResponse(
+            generate_streaming_response(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Request-ID": request_id
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing streaming chat: {str(e)}")
+
+@app.post("/chat/stream/stop")
+async def stop_streaming(request_id: str):
+    """Stop a streaming operation."""
+    from agents.shared.streaming_controller import streaming_manager
+    
+    success = streaming_manager.stop_controller(request_id)
+    if success:
+        return {"status": "stopped", "request_id": request_id}
+    else:
+        return {"status": "not_found", "request_id": request_id}
 
 @app.get("/conversations", response_model=List[ConversationInfo])
 async def list_conversations(

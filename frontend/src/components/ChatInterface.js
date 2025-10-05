@@ -24,6 +24,9 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
   const [askModelHighlight, setAskModelHighlight] = useState('');
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [currentModel, setCurrentModel] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [currentRequestId, setCurrentRequestId] = useState(null);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -37,6 +40,14 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleStopStreaming = (requestId) => {
+    if (requestId === currentRequestId) {
+      setIsStreaming(false);
+      setStreamingContent('');
+      setCurrentRequestId(null);
+    }
   };
 
   const loadConversations = async () => {
@@ -73,8 +84,10 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     }
   };
 
+  // Keep sendMessage as fallback for non-streaming mode
+  // eslint-disable-next-line no-unused-vars
   const sendMessage = async (selectedText = null) => {
-    if (!inputMessage.trim() || isLoading) return;
+    if (!inputMessage.trim() || isLoading || isStreaming) return;
 
     const userMessage = {
       id: Date.now().toString(),
@@ -132,10 +145,108 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
     }
   };
 
+  const sendMessageStreaming = async (selectedText = null) => {
+    if (!inputMessage.trim() || isLoading || isStreaming) return;
+
+    const userMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputMessage,
+      timestamp: new Date().toISOString(),
+      metadata: {}
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
+    setIsStreaming(true);
+    setStreamingContent('');
+    setError(null);
+    
+    // Create a temporary streaming message
+    const streamingMessageId = `streaming-${Date.now()}`;
+    const streamingMessage = {
+      id: streamingMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      metadata: { isStreaming: true }
+    };
+    
+    setMessages(prev => [...prev, streamingMessage]);
+    
+    try {
+      await apiService.sendChatMessageStreaming(
+        inputMessage,
+        currentConversation?.conversation_id,
+        3,
+        true,
+        (chunk, requestId) => {
+          setStreamingContent(prev => prev + chunk);
+          setCurrentRequestId(requestId);
+        },
+        (requestId, metadata) => {
+          // Streaming complete - replace the streaming message with the final message
+          // Capture the final content before clearing streaming state
+          const finalContent = streamingContent || '';
+          
+          setIsStreaming(false);
+          setCurrentRequestId(null);
+          
+          const assistantMessage = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: finalContent,
+            timestamp: new Date().toISOString(),
+            metadata: metadata || {}
+          };
+          
+          // Replace the streaming message with the final message
+          setMessages(prev => prev.map(msg => 
+            msg.id === streamingMessageId ? assistantMessage : msg
+          ));
+          
+          // Clear streaming content after a short delay to ensure the message is updated
+          setTimeout(() => {
+            setStreamingContent('');
+          }, 100);
+          
+          // Update current conversation if it's a new one
+          if (!currentConversation && metadata?.conversation_id) {
+            setCurrentConversation({
+              conversation_id: metadata.conversation_id,
+              title: "New Conversation",
+              messages: [userMessage, assistantMessage]
+            });
+            loadConversations();
+          }
+        },
+        (error, requestId) => {
+          setError(error || 'Streaming failed');
+          setIsStreaming(false);
+          setStreamingContent('');
+          setCurrentRequestId(null);
+        }
+      );
+
+    } catch (err) {
+      setError(err.message || 'Failed to send streaming message');
+      setIsStreaming(false);
+      setStreamingContent('');
+      setCurrentRequestId(null);
+    } finally {
+      // Clear highlight after sending message
+      if (selectedText) {
+        setAskModelHighlight('');
+      }
+    }
+  };
+
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage(askModelHighlight);
+      // Use streaming by default, fallback to regular if needed
+      sendMessageStreaming(askModelHighlight);
     }
   };
 
@@ -269,11 +380,15 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
               </div>
             </div>
           ) : (
-            messages.map((message) => (
+            messages.map((message, index) => (
               <ChatMessage
                 key={message.id}
                 message={message}
                 conversationId={currentConversation?.conversation_id}
+                isStreaming={message.metadata?.isStreaming || (isStreaming && index === messages.length - 1 && message.role === 'assistant')}
+                streamingContent={streamingContent}
+                onStopStreaming={handleStopStreaming}
+                requestId={currentRequestId}
               />
             ))
           )}
@@ -288,6 +403,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
               </div>
             </div>
           )}
+          
           
           <div ref={messagesEndRef} />
         </div>
@@ -386,11 +502,11 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
                 disabled={isLoading}
               />
               <button
-                onClick={() => sendMessage(askModelHighlight)}
-                disabled={!inputMessage.trim() || isLoading}
+                onClick={() => sendMessageStreaming(askModelHighlight)}
+                disabled={!inputMessage.trim() || isLoading || isStreaming}
                 className="send-btn"
               >
-                Send
+                {isStreaming ? 'Streaming...' : 'Send'}
               </button>
             </div>
           </div>

@@ -48,6 +48,10 @@
   color: white;
 }
 
+.message.user .message-text {
+  color: white;
+}
+
 .message.assistant .message-content {
   background: #2d2d2d;
   color: #ffffff;
@@ -57,6 +61,7 @@
 .message-text {
   line-height: 1.5;
   word-wrap: break-word;
+  color: #ffffff;
 }
 
 .message-text strong {
@@ -211,14 +216,45 @@
 .subqueries-display {
   margin-top: 15px;
   padding-top: 15px;
-  border-top: 1px solid #e1e8ed;
+  border-top: 1px solid #404040;
+}
+
+.subqueries-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.subqueries-header:hover {
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .subqueries-display h4 {
-  margin: 0 0 10px 0;
-  color: #2c3e50;
+  margin: 0;
+  color: #9fa6b2;
   font-size: 0.9em;
   font-weight: 600;
+}
+
+.subqueries-toggle {
+  background: none;
+  border: none;
+  color: #9fa6b2;
+  font-size: 0.8em;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.subqueries-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .subqueries-list {
@@ -232,7 +268,7 @@
   align-items: flex-start;
   gap: 8px;
   padding: 8px 12px;
-  background: #f8f9fa;
+  background: #3d3d3d;
   border-radius: 6px;
   border-left: 3px solid #667eea;
 }
@@ -248,7 +284,47 @@
   flex: 1;
   font-size: 0.85em;
   line-height: 1.4;
-  color: #2c3e50;
+  color: #ffffff;
+}
+
+/* Streaming styles */
+.streaming-content {
+  position: relative;
+}
+
+.streaming-cursor {
+  animation: blink 1s infinite;
+  color: #007bff;
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.stop-streaming-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.stop-streaming-btn:hover {
+  opacity: 1;
+}
+
+.stop-streaming-btn:active {
+  background: #c82333;
 }
 
 /* Responsive design for subqueries */

@@ -3,10 +3,16 @@ Query Planner for Multi-hop Research Agent
 Handles subquery generation and query planning with adaptive complexity analysis.
 """
 
-from typing import List, Dict, Any, Optional, Tuple, Set
+from typing import List, Dict, Any, Optional, Tuple, Set, Iterable
 import re
 import logging
+import random
+import textwrap
 from dataclasses import dataclass, field
+from itertools import cycle
+from difflib import SequenceMatcher
+
+import numpy as np
 from ..shared.interfaces import IQueryPlanner
 
 # Configure logging
@@ -91,7 +97,13 @@ class QueryPlanner(IQueryPlanner):
     Uses complexity analysis to determine the optimal number of hops dynamically.
     """
     
-    def __init__(self, min_hops: int = 3, max_hops: int = 10, enable_aspect_coverage: bool = True):
+    def __init__(
+        self,
+        min_hops: int = 3,
+        max_hops: int = 10,
+        enable_aspect_coverage: bool = True,
+        coverage_goal: float = 0.8,
+    ):
         """
         Initialize the query planner with adaptive parameters.
         
@@ -103,6 +115,18 @@ class QueryPlanner(IQueryPlanner):
         self.min_hops = min_hops
         self.max_hops = max_hops
         self.enable_aspect_coverage = enable_aspect_coverage
+        self.coverage_goal = coverage_goal
+        self.duplicate_similarity_threshold = 0.8
+        self.coverage_similarity_threshold = 0.7
+        self._phrasing_cycle = cycle(
+            [
+                "definition focused angle",
+                "functional role angle",
+                "mechanism/process angle",
+                "context/use-case angle",
+                "example/comparison angle",
+            ]
+        )
         
         # Complexity indicators
         self.complexity_indicators = {
@@ -115,7 +139,13 @@ class QueryPlanner(IQueryPlanner):
             'complex_connectives': [r'however|although|despite|while|whereas']
         }
         
-        logger.info(f"QueryPlanner initialized with adaptive parameters: min_hops={min_hops}, max_hops={max_hops}, aspect_coverage={enable_aspect_coverage}")
+        logger.info(
+            "QueryPlanner initialized with adaptive parameters: min_hops=%s, max_hops=%s, aspect_coverage=%s, coverage_goal=%.2f",
+            min_hops,
+            max_hops,
+            enable_aspect_coverage,
+            coverage_goal,
+        )
     
     def analyze_complexity(self, question: str) -> QueryComplexity:
         """
@@ -166,30 +196,30 @@ class QueryPlanner(IQueryPlanner):
         # Normalize complexity score
         complexity_score = min(complexity_score, 1.0)
         
-        # Estimate hops based on complexity (dev settings: simple=3, medium=7, hard=10)
+        # Estimate hops based on complexity (dev settings: simple=2, medium=6, hard=10)
         if complexity_score < 0.2:
-            estimated_hops = 3  # Simple questions
+            base_hops = 2
             reasoning = "Simple, focused question requiring minimal decomposition"
             confidence = 0.9
         elif complexity_score < 0.4:
-            estimated_hops = 5
+            base_hops = 4
             reasoning = "Moderately simple question with 1-2 aspects"
             confidence = 0.8
         elif complexity_score < 0.6:
-            estimated_hops = 7  # Medium complexity
+            base_hops = 6  # Medium complexity
             reasoning = "Complex question with multiple aspects or comparisons"
             confidence = 0.7
         elif complexity_score < 0.8:
-            estimated_hops = 9
+            base_hops = 8
             reasoning = "Highly complex question requiring multiple perspectives"
             confidence = 0.6
         else:
-            estimated_hops = 10  # Hard/very complex questions
+            base_hops = 10  # Hard/very complex questions
             reasoning = "Very complex question with many interconnected aspects"
             confidence = 0.5
-        
-        # Ensure within bounds
-        estimated_hops = max(self.min_hops, min(estimated_hops, self.max_hops))
+
+        # Ensure within bounds while respecting configured hop limits
+        estimated_hops = max(self.min_hops, min(base_hops, self.max_hops))
         
         logger.info(f"Complexity analysis: score={complexity_score:.2f}, estimated_hops={estimated_hops}, indicators={list(indicators_found.keys())}")
         
@@ -349,34 +379,47 @@ class QueryPlanner(IQueryPlanner):
             uncovered = aspect_coverage.get_uncovered_aspects(threshold=coverage_threshold)
             coverage_pct = aspect_coverage.get_coverage_percentage()
             weighted_coverage = aspect_coverage.get_weighted_coverage()
-            
-            # Log current coverage status
-            logger.info(f"Coverage status at hop {current_hop}:")
-            logger.info(f"  Overall coverage: {coverage_pct:.1%}")
-            logger.info(f"  Weighted coverage: {weighted_coverage:.1%}")
-            logger.info(f"  Uncovered aspects: {len(uncovered)}/{len(aspect_coverage.aspects)}")
-            
-            # Check if all core aspects are covered
+
+            logger.info("Coverage status at hop %s:", current_hop)
+            logger.info("  Overall coverage: %.1f%%", coverage_pct * 100)
+            logger.info("  Weighted coverage: %.1f%%", weighted_coverage * 100)
+            logger.info(
+                "  Uncovered aspects: %s/%s",
+                len(uncovered),
+                len(aspect_coverage.aspects),
+            )
+
             uncovered_core = [a for a in uncovered if a.importance >= 0.8]
-            
-            # Always continue if below minimum hops (even with good coverage)
+
             if current_hop < self.min_hops:
-                return True, f"Below minimum hops ({self.min_hops}), continuing to cover {len(uncovered)} aspects"
-            
-            # After min_hops, check coverage quality
-            if not uncovered_core and weighted_coverage >= 0.7:
-                # All core aspects covered
-                return False, f"All core aspects covered (weighted coverage: {weighted_coverage:.1%})"
-            elif uncovered_core:
-                # Still have uncovered core aspects
-                uncovered_names = [a.aspect for a in uncovered_core[:2]]  # Show first 2
+                return True, (
+                    f"Below minimum hops ({self.min_hops}), continuing to cover {len(uncovered)}"
+                    " aspects"
+                )
+
+            if coverage_pct >= self.coverage_goal and not uncovered_core:
+                return False, (
+                    f"Coverage goal reached ({coverage_pct:.1%} >= {self.coverage_goal:.0%})"
+                )
+
+            if not uncovered_core and weighted_coverage >= self.coverage_goal:
+                return False, (
+                    f"All core aspects covered (weighted coverage: {weighted_coverage:.1%})"
+                )
+
+            if uncovered_core:
+                uncovered_names = [a.aspect for a in uncovered_core[:2]]
                 return True, f"Core aspects still uncovered: {uncovered_names}"
-            elif weighted_coverage < 0.7:
-                # Coverage not sufficient
-                return True, f"Weighted coverage below threshold ({weighted_coverage:.1%} < 70%), continuing"
-            else:
-                # Good coverage, can stop
-                return False, f"Sufficient aspect coverage achieved ({weighted_coverage:.1%})"
+
+            if weighted_coverage < self.coverage_goal:
+                return True, (
+                    f"Weighted coverage below goal ({weighted_coverage:.1%} < "
+                    f"{self.coverage_goal:.0%}), continuing"
+                )
+
+            return False, (
+                f"Sufficient aspect coverage achieved ({weighted_coverage:.1%})"
+            )
         
         # Fallback to traditional document-quality based stopping
         if len(retrieved_docs) > 0:
@@ -633,9 +676,13 @@ class QueryPlanner(IQueryPlanner):
         
         return aspects
     
-    def update_aspect_coverage(self, aspect_coverage: AspectCoverage, 
-                              documents: List[Dict[str, Any]], 
-                              current_hop: int) -> None:
+    def update_aspect_coverage(
+        self,
+        aspect_coverage: AspectCoverage,
+        documents: List[Dict[str, Any]],
+        current_hop: int,
+        embedder: Optional[Any] = None,
+    ) -> None:
         """
         Update aspect coverage based on retrieved documents.
         
@@ -645,38 +692,43 @@ class QueryPlanner(IQueryPlanner):
             current_hop: Current hop number
         """
         for aspect in aspect_coverage.aspects:
-            # Calculate coverage for this aspect based on documents
-            aspect_score = 0.0
-            
-            for doc in documents:
-                doc_text = doc.get('content', '').lower()
-                doc_title = doc.get('title', '').lower()
-                combined_text = doc_text + ' ' + doc_title
-                
-                # Count keyword matches
-                keyword_matches = sum(1 for kw in aspect.keywords if kw.lower() in combined_text)
-                
-                # Calculate relevance score for this document to this aspect
-                if aspect.keywords:
-                    doc_relevance = keyword_matches / len(aspect.keywords)
-                    # Weight by document score if available
-                    doc_score = doc.get('score', 0.5)
-                    aspect_score = max(aspect_score, doc_relevance * doc_score)
-            
-            # Update coverage score (take max of current and new score)
+            keyword_score = self._calculate_keyword_overlap_score(aspect, documents)
+
+            similarity_score = 0.0
+            if embedder is not None:
+                similarity_score = self._calculate_embedding_similarity(
+                    aspect, documents, embedder
+                )
+
+            combined_score = max(keyword_score, similarity_score)
+
             current_score = aspect_coverage.coverage_scores.get(aspect.aspect, 0.0)
-            new_score = max(current_score, aspect_score)
+            new_score = max(current_score, combined_score)
             aspect_coverage.coverage_scores[aspect.aspect] = new_score
-            
-            # Track when aspect was first covered
-            if new_score >= 0.5 and aspect.aspect not in aspect_coverage.covered_by_hop:
+
+            if (
+                new_score >= self.coverage_similarity_threshold
+                and aspect.aspect not in aspect_coverage.covered_by_hop
+            ):
                 aspect_coverage.covered_by_hop[aspect.aspect] = current_hop
-                logger.info(f"Aspect '{aspect.aspect}' covered at hop {current_hop} (score: {new_score:.2f})")
-    
-    def generate_subqueries_for_aspects(self, main_question: str, 
-                                       uncovered_aspects: List[QueryAspect],
-                                       llm_client=None,
-                                       max_subqueries: int = 3) -> List[Tuple[str, str]]:
+                logger.info(
+                    "Aspect '%s' covered at hop %s (score: %.2f)",
+                    aspect.aspect,
+                    current_hop,
+                    new_score,
+                )
+
+    def generate_subqueries_for_aspects(
+        self,
+        main_question: str,
+        uncovered_aspects: List[QueryAspect],
+        llm_client=None,
+        max_subqueries: int = 3,
+        past_subqueries: Optional[List[str]] = None,
+        coverage_scores: Optional[Dict[str, float]] = None,
+        retrieved_docs: Optional[List[Dict[str, Any]]] = None,
+        uncovered_aspect_names: Optional[List[str]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Generate targeted subqueries for uncovered aspects.
         
@@ -699,30 +751,77 @@ class QueryPlanner(IQueryPlanner):
         aspects_to_target = sorted_aspects[:max_subqueries]
         
         subquery_mapping = []
-        
+
+        if coverage_scores is None:
+            coverage_scores = {}
+
+        if past_subqueries is None:
+            past_subqueries = []
+
+        if retrieved_docs is None:
+            retrieved_docs = []
+
+        if uncovered_aspect_names is None:
+            uncovered_aspect_names = [aspect.aspect for aspect in aspects_to_target]
+
         if llm_client is not None and hasattr(llm_client, 'generate_text'):
-            # Use LLM to generate natural subqueries
             try:
                 llm_subqueries = self._generate_aspect_subqueries_llm(
-                    main_question, aspects_to_target, llm_client
+                    main_question,
+                    aspects_to_target,
+                    llm_client,
+                    past_subqueries=past_subqueries,
+                    coverage_scores=coverage_scores,
+                    retrieved_docs=retrieved_docs,
+                    uncovered_aspect_names=uncovered_aspect_names,
                 )
                 if llm_subqueries:
-                    logger.info(f"Generated {len(llm_subqueries)} aspect-guided subqueries using LLM")
-                    return llm_subqueries
-            except Exception as e:
-                logger.warning(f"LLM subquery generation failed: {e}, falling back to templates")
-        
-        # Fallback to template-based generation
+                    logger.info(
+                        "Generated %d aspect-guided subqueries using LLM",
+                        len(llm_subqueries),
+                    )
+                    unique_llm_subqueries = self._filter_duplicate_subqueries(
+                        [sq for sq, _ in llm_subqueries], past_subqueries
+                    )
+                    filtered_results = [
+                        (subquery, aspect)
+                        for subquery, aspect in llm_subqueries
+                        if subquery in unique_llm_subqueries
+                    ]
+
+                    if filtered_results:
+                        return filtered_results
+            except Exception as exc:
+                logger.warning(
+                    "LLM subquery generation failed: %s, falling back to templates",
+                    exc,
+                )
+
+        # Fallback to template-based generation with phrasing variations
         for aspect in aspects_to_target:
-            subquery = self._aspect_to_subquery_template(aspect, main_question)
-            subquery_mapping.append((subquery, aspect.aspect))
-        
-        logger.info(f"Generated {len(subquery_mapping)} aspect-guided subqueries using templates")
-        return subquery_mapping
-    
-    def _generate_aspect_subqueries_llm(self, main_question: str,
-                                       aspects: List[QueryAspect],
-                                       llm_client) -> List[Tuple[str, str]]:
+            template_subquery = self._aspect_to_subquery_template(aspect, main_question)
+            varied_subquery = self._apply_phrasing_variation(template_subquery)
+            subquery_mapping.append((varied_subquery, aspect.aspect))
+
+        logger.info(
+            "Generated %d aspect-guided subqueries using templates",
+            len(subquery_mapping),
+        )
+        filtered_templates = self._filter_duplicate_subqueries(
+            [sq for sq, _ in subquery_mapping], past_subqueries
+        )
+        return [pair for pair in subquery_mapping if pair[0] in filtered_templates]
+
+    def _generate_aspect_subqueries_llm(
+        self,
+        main_question: str,
+        aspects: List[QueryAspect],
+        llm_client,
+        past_subqueries: Optional[List[str]] = None,
+        coverage_scores: Optional[Dict[str, float]] = None,
+        retrieved_docs: Optional[List[Dict[str, Any]]] = None,
+        uncovered_aspect_names: Optional[List[str]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Use LLM to generate natural subqueries for uncovered aspects.
         
@@ -734,47 +833,280 @@ class QueryPlanner(IQueryPlanner):
         Returns:
             List of (subquery, aspect_name) tuples
         """
-        system_prompt = """You are a research assistant that generates focused subqueries.
-        Given a main question and specific aspects that need to be covered, generate natural,
-        well-formed subqueries that will help retrieve information about those aspects.
-        
-        Each subquery should be a complete, standalone question that targets the specific aspect.
-        Return one subquery per line in this format:
-        SUBQUERY: <subquery text> | ASPECT: <aspect name>"""
-        
-        aspect_list = "\n".join([
-            f"- {aspect.aspect} (type: {aspect.aspect_type}, importance: {'CORE' if aspect.importance >= 0.8 else 'optional'})"
-            for aspect in aspects
-        ])
-        
-        prompt = f"""Main Question: {main_question}
+        if past_subqueries is None:
+            past_subqueries = []
 
-Uncovered Aspects:
-{aspect_list}
+        if coverage_scores is None:
+            coverage_scores = {}
 
-Generate focused subqueries to cover these aspects. Each subquery should target one specific aspect."""
-        
+        if retrieved_docs is None:
+            retrieved_docs = []
+
+        if uncovered_aspect_names is None:
+            uncovered_aspect_names = [aspect.aspect for aspect in aspects]
+
+        coverage_recap = ", ".join(
+            f"{name}: {coverage_scores.get(name, 0.0):.2f}" for name in uncovered_aspect_names
+        ) or "N/A"
+
+        retrieved_titles = [
+            f"- {doc.get('title', 'Unknown')}" for doc in retrieved_docs[:5]
+        ]
+        retrieved_summary = "\n".join(retrieved_titles) if retrieved_titles else "(no documents yet)"
+
+        phrasing_guidance = next(self._phrasing_cycle)
+
+        system_prompt = textwrap.dedent(
+            """
+            You are an expert research planner coordinating iterative, aspect-guided discovery.
+            Generate new subqueries that explore uncovered aspects using varied phrasing and angle.
+            Avoid repeating concepts that were already explored.
+            """
+        ).strip()
+
+        aspect_table = "\n".join(
+            [
+                f"- Aspect: {aspect.aspect} | Type: {aspect.aspect_type} | Importance: {'CORE' if aspect.importance >= 0.8 else 'optional'}"
+                for aspect in aspects
+            ]
+        )
+
+        prompt = textwrap.dedent(
+            f"""
+            Given the uncovered aspects: {', '.join(uncovered_aspect_names)}, and these past subqueries: {self._inline_join(past_subqueries)}, generate 1–3 new subqueries that cover different conceptual angles or missing perspectives.
+            Avoid repeating phrasing or concepts already seen.
+            Each subquery should target a distinct aspect of the topic.
+
+            Context:
+            Main question: {main_question}
+            Aspect focus:
+            {aspect_table}
+
+            Past attempts:
+            {self._format_for_prompt(past_subqueries)}
+
+            Recently retrieved documents:
+            {retrieved_summary}
+
+            Coverage snapshot: {coverage_recap}
+
+            Guidance: produce 1-3 fresh subqueries, each targeting a distinct uncovered aspect and using a {phrasing_guidance}.
+            Respond with lines in the format:
+            SUBQUERY: <subquery text> | ASPECT: <matching aspect name>
+            """
+        ).strip()
+
         response = llm_client.generate_text(prompt, system_prompt, max_tokens=500)
-        
-        # Parse response
+
         subquery_mapping = []
         for line in response.strip().split('\n'):
             if 'SUBQUERY:' not in line:
                 continue
-            
+
             try:
                 parts = line.split('|')
                 subquery = parts[0].replace('SUBQUERY:', '').strip()
-                aspect_name = parts[1].replace('ASPECT:', '').strip() if len(parts) > 1 else ""
-                
+                aspect_name = parts[1].replace('ASPECT:', '').strip() if len(parts) > 1 else ''
+
                 if subquery:
-                    # Match to actual aspect
-                    matched_aspect = next((a.aspect for a in aspects if aspect_name in a.aspect or a.aspect in aspect_name), aspects[0].aspect)
+                    matched_aspect = self._match_aspect_name(aspect_name, aspects)
                     subquery_mapping.append((subquery, matched_aspect))
-            except Exception as e:
-                logger.debug(f"Failed to parse subquery line: {line} - {e}")
-        
-        return subquery_mapping
+            except Exception as exc:
+                logger.debug("Failed to parse subquery line: %s - %s", line, exc)
+
+        return self._enforce_semantic_diversity(subquery_mapping)
+
+    def _format_for_prompt(self, items: Iterable[str], limit: int = 6) -> str:
+        if not items:
+            return "(none)"
+        trimmed = [str(item).strip() for item in items if str(item).strip()]
+        if not trimmed:
+            return "(none)"
+        if len(trimmed) > limit:
+            trimmed = trimmed[-limit:]
+        return "\n".join(f"- {entry}" for entry in trimmed)
+
+    def _inline_join(self, items: Iterable[str], limit: int = 6) -> str:
+        if not items:
+            return "(none)"
+        trimmed = [str(item).strip() for item in items if str(item).strip()]
+        if not trimmed:
+            return "(none)"
+        if len(trimmed) > limit:
+            trimmed = trimmed[-limit:]
+        return '; '.join(trimmed)
+
+    def _filter_duplicate_subqueries(
+        self, candidates: List[str], past_subqueries: List[str]
+    ) -> List[str]:
+        history = [self._normalize_subquery_text(sq) for sq in past_subqueries if isinstance(sq, str)]
+        filtered: List[str] = []
+        for candidate in candidates:
+            if not candidate:
+                continue
+            normalized = self._normalize_subquery_text(candidate)
+            if self._is_duplicate(normalized, history):
+                continue
+            filtered.append(candidate)
+            history.append(normalized)
+        return filtered
+
+    def _is_duplicate(self, candidate_norm: str, history: List[str]) -> bool:
+        candidate_words = self._tokenize(candidate_norm)
+        for past in history:
+            if not past:
+                continue
+            if candidate_norm == past:
+                return True
+            if candidate_norm.startswith(past) or past.startswith(candidate_norm):
+                return True
+            ratio = SequenceMatcher(None, candidate_norm, past).ratio()
+            if ratio >= self.duplicate_similarity_threshold:
+                return True
+            past_words = self._tokenize(past)
+            if past_words:
+                overlap = len(candidate_words & past_words)
+                union = len(candidate_words | past_words)
+                if union > 0 and (overlap / union) >= 0.75:
+                    return True
+        return False
+
+    def _match_aspect_name(self, aspect_candidate: str, aspects: List[QueryAspect]) -> str:
+        if not aspects:
+            return aspect_candidate or "General"
+        if not aspect_candidate:
+            return aspects[0].aspect
+        best_match = aspects[0].aspect
+        best_score = 0.0
+        target = aspect_candidate.lower()
+        for aspect in aspects:
+            score = SequenceMatcher(None, target, aspect.aspect.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = aspect.aspect
+        return best_match
+
+    def _enforce_semantic_diversity(
+        self, subquery_mapping: List[Tuple[str, str]]
+    ) -> List[Tuple[str, str]]:
+        if not subquery_mapping:
+            return []
+        unique_pairs: List[Tuple[str, str]] = []
+        seen: List[str] = []
+        for subquery, aspect in subquery_mapping:
+            if not subquery:
+                continue
+            normalized = self._normalize_subquery_text(subquery)
+            if self._is_duplicate(normalized, seen):
+                continue
+            unique_pairs.append((subquery, aspect))
+            seen.append(normalized)
+        return unique_pairs
+
+    def _apply_phrasing_variation(self, subquery: str) -> str:
+        if not subquery:
+            return subquery
+        question = subquery.strip()
+        if question.endswith('?'):
+            question_root = question[:-1]
+        else:
+            question_root = question
+        suffix_options = [
+            " specifically",
+            " in practical transformer deployments",
+            " within modern architectures",
+            " for real-world scenarios",
+            " from a conceptual standpoint",
+        ]
+        suffix = random.choice(suffix_options)
+        if suffix.strip() in question_root.lower():
+            suffix = ''
+        return f"{question_root}{suffix}?".strip()
+
+    def _calculate_keyword_overlap_score(
+        self, aspect: QueryAspect, documents: List[Dict[str, Any]]
+    ) -> float:
+        if not documents or not aspect.keywords:
+            return 0.0
+        best_score = 0.0
+        keywords = [kw.lower() for kw in aspect.keywords]
+        for doc in documents:
+            text = self._extract_text_from_doc(doc)
+            if not text:
+                continue
+            matches = sum(1 for kw in keywords if kw in text)
+            if matches == 0:
+                continue
+            coverage_fraction = matches / max(len(keywords), 1)
+            doc_score = float(doc.get('score', 0.5))
+            best_score = max(best_score, min(coverage_fraction * doc_score, 1.0))
+        return best_score
+
+    def _extract_text_from_doc(self, doc: Dict[str, Any]) -> str:
+        fields = [
+            doc.get('summary', ''),
+            doc.get('snippet', ''),
+            doc.get('content', ''),
+            doc.get('full_text', ''),
+        ]
+        combined = ' '.join(field for field in fields if field)
+        return combined.lower()
+
+    def _calculate_embedding_similarity(
+        self, aspect: QueryAspect, documents: List[Dict[str, Any]], embedder: Any
+    ) -> float:
+        if not documents:
+            return 0.0
+        try:
+            aspect_text = f"{aspect.aspect}. Keywords: {' '.join(aspect.keywords)}"
+            aspect_vector = self._encode_text(embedder, aspect_text)
+        except Exception as exc:
+            logger.debug("Failed to encode aspect for similarity: %s", exc)
+            return 0.0
+
+        best_similarity = 0.0
+        for doc in documents:
+            doc_text = self._extract_text_from_doc(doc)
+            if not doc_text:
+                continue
+            try:
+                doc_vector = self._encode_text(embedder, doc_text)
+            except Exception as exc:
+                logger.debug("Failed to encode document for similarity: %s", exc)
+                continue
+            similarity = self._cosine_similarity(aspect_vector, doc_vector)
+            best_similarity = max(best_similarity, similarity)
+        return best_similarity
+
+    def _encode_text(self, embedder: Any, text: str) -> np.ndarray:
+        if not hasattr(embedder, 'encode'):
+            raise ValueError("Embedder does not implement encode method")
+        try:
+            vector = embedder.encode(text, convert_to_numpy=True)
+        except TypeError:
+            vector = embedder.encode([text])[0]
+        if isinstance(vector, list):
+            vector = np.array(vector, dtype=float)
+        vector = np.asarray(vector, dtype=float)
+        norm = np.linalg.norm(vector)
+        if norm == 0:
+            return vector
+        return vector / norm
+
+    def _cosine_similarity(self, vec_a: np.ndarray, vec_b: np.ndarray) -> float:
+        if vec_a.size == 0 or vec_b.size == 0:
+            return 0.0
+        return float(np.dot(vec_a, vec_b))
+
+    def _normalize_subquery_text(self, text: str) -> str:
+        stripped = re.sub(r'[^a-z0-9\s]', ' ', text.lower())
+        stripped = re.sub(r'\s+', ' ', stripped).strip()
+        return stripped
+
+    def _tokenize(self, text: str) -> Set[str]:
+        if not text:
+            return set()
+        return set(word for word in text.split() if word)
     
     def _aspect_to_subquery_template(self, aspect: QueryAspect, main_question: str) -> str:
         """

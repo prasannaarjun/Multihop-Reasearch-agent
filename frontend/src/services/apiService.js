@@ -248,6 +248,106 @@ class ApiService {
     };
   }
 
+  // Streaming Chat API methods
+  async sendChatMessageStreaming(message, conversationId = null, perSubK = 3, includeContext = true, onChunk = null, onComplete = null, onError = null) {
+    const apiBase = getApiBase();
+    const requestBody = {
+      message,
+      conversation_id: conversationId,
+      per_sub_k: perSubK,
+      include_context: includeContext
+    };
+
+    const config = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    };
+
+    // Add authorization header if token exists
+    if (this.token) {
+      config.headers.Authorization = `Bearer ${this.token}`;
+    }
+
+    try {
+      const response = await fetch(`${apiBase}/chat/stream`, config);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let requestId = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue; // Skip empty data lines
+              
+              const data = JSON.parse(jsonStr);
+              requestId = data.request_id;
+              
+              if (data.type === 'content' && data.chunk && onChunk) {
+                onChunk(data.chunk, data.request_id);
+              } else if (data.type === 'complete' && onComplete) {
+                onComplete(data.request_id, data);
+              } else if (data.type === 'metadata' && onComplete) {
+                // Handle metadata completion
+                onComplete(data.request_id, data);
+              } else if (data.type === 'error' && onError) {
+                onError(data.error, data.request_id);
+              }
+            } catch (e) {
+              console.error('Error parsing streaming data:', e);
+              console.error('Problematic line:', line);
+              // Continue processing other lines instead of breaking
+            }
+          }
+        }
+      }
+
+      return { requestId, success: true };
+    } catch (error) {
+      if (onError) {
+        onError(error.message);
+      }
+      throw error;
+    }
+  }
+
+  async stopStreaming(requestId) {
+    const apiBase = getApiBase();
+    const config = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
+
+    if (this.token) {
+      config.headers.Authorization = `Bearer ${this.token}`;
+    }
+
+    try {
+      const response = await fetch(`${apiBase}/chat/stream/stop?request_id=${requestId}`, config);
+      return await response.json();
+    } catch (error) {
+      console.error('Error stopping stream:', error);
+      throw error;
+    }
+  }
+
   async getConversations() {
     const conversations = await this.request('/conversations');
     // Convert to legacy format for backward compatibility

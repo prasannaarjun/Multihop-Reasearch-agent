@@ -3,7 +3,8 @@ Response Generator for Chat Agent
 Handles generating conversational responses from research results.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Generator
+import threading
 from ..shared.models import ResearchResult, ChatMessage
 
 
@@ -53,6 +54,40 @@ class ResponseGenerator:
         response_parts.append("\n\nIs there anything specific about this topic you'd like me to explore further, or do you have any other questions?")
         
         return '\n'.join(response_parts)
+    
+    def generate_chat_response_streaming(self, research_result: ResearchResult, 
+                                       context: Dict[str, Any], 
+                                       stop_flag: threading.Event = None) -> Generator[str, None, None]:
+        """
+        Generate a conversational response from research results with streaming.
+        
+        Args:
+            research_result: The research result to generate response from
+            context: Conversation context
+            stop_flag: Threading event to signal stop
+            
+        Yields:
+            Response chunks as they are generated
+        """
+        # Add context-aware introduction if this is a follow-up (non-streaming)
+        if context and context.get('message_count', 0) > 1:
+            yield "Based on our conversation and the research I've conducted, here's what I found:\n\n"
+        
+        # Stream the main answer
+        yield from research_result.answer_streaming_generator
+        
+        # Add research process summary (non-streaming)
+        if research_result.subqueries:
+            successful_subqueries = [sq for sq in research_result.subqueries if sq.success]
+            yield f"\n**Research Process:** I broke down your question into {len(successful_subqueries)} key areas to ensure comprehensive coverage."
+        
+        # Add source information (non-streaming)
+        if research_result.citations:
+            unique_sources = len(set(citation.get('filename', '') for citation in research_result.citations))
+            yield f"\n**Sources:** I consulted {len(research_result.citations)} relevant documents from {unique_sources} different sources."
+        
+        # Add follow-up suggestion (non-streaming)
+        yield "\n\nIs there anything specific about this topic you'd like me to explore further, or do you have any other questions?"
     
     def generate_error_response(self, error: str, context: Dict[str, Any]) -> str:
         """

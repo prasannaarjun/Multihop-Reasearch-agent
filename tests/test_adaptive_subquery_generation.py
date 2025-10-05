@@ -15,6 +15,8 @@ from unittest.mock import Mock, MagicMock, patch
 from agents.research.query_planner import QueryPlanner, QueryComplexity, ScoredSubquery
 from agents.research.research_agent import ResearchAgent
 from agents.shared.models import ResearchResult, SubqueryResult
+from agents.research.query_planner import QueryAspect, AspectCoverage
+import numpy as np
 
 # Configure logging for tests
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -133,6 +135,87 @@ class TestAdaptiveSubqueryGeneration:
         complex = "Compare multiple machine learning algorithms across various domains and explain all their advantages, disadvantages, use cases, and future trends"
         subqueries_complex = planner.generate_subqueries(complex, adaptive=True)
         assert len(subqueries_complex) <= 4, "Should respect max_hops"
+
+    def test_generate_subqueries_avoids_duplicates(self):
+        """LLM results should filter near-duplicate subqueries."""
+        planner = QueryPlanner(enable_aspect_coverage=True)
+        mock_llm = Mock()
+        mock_llm.generate_text.return_value = (
+            "SUBQUERY: What is an attention head? | ASPECT: Definition\n"
+            "SUBQUERY: What is an attention head in transformers? | ASPECT: Definition\n"
+            "SUBQUERY: Why are attention heads used? | ASPECT: Purpose"
+        )
+
+        aspects = [
+            QueryAspect("Definition", "definition", 1.0, ["attention", "head"]),
+            QueryAspect("Purpose", "causal", 0.9, ["attention", "purpose"]),
+        ]
+
+        results = planner.generate_subqueries_for_aspects(
+            "Explain attention heads",
+            aspects,
+            llm_client=mock_llm,
+            max_subqueries=3,
+            past_subqueries=["What is an attention head?"],
+        )
+
+        subqueries = [sq for sq, _ in results]
+        assert len(subqueries) == 1 or subqueries == ["Why are attention heads used?"], (
+            "Duplicate phrasing should be filtered"
+        )
+
+    def test_generate_subqueries_variations_on_templates(self):
+        """Template fallback should still diversify phrasing."""
+        planner = QueryPlanner(enable_aspect_coverage=True)
+        aspects = [
+            QueryAspect("Applications", "application", 0.7, ["applications", "attention"]),
+        ]
+
+        mock_llm = Mock()
+        mock_llm.generate_text.side_effect = RuntimeError("LLM down")
+
+        results = planner.generate_subqueries_for_aspects(
+            "Explain attention heads",
+            aspects,
+            llm_client=mock_llm,
+            max_subqueries=1,
+            past_subqueries=["What are applications of attention heads?"],
+        )
+
+        assert len(results) == 1
+        assert results[0][0].endswith("?"), "Fallback should still create question"
+        assert results[0][0] != "What are the applications and uses of attention?", (
+            "Phrasing variation should adjust wording"
+        )
+
+    def test_generate_subqueries_prompt_includes_context(self):
+        """Prompt sent to LLM should include uncovered context and past queries."""
+        planner = QueryPlanner(enable_aspect_coverage=True)
+        mock_llm = Mock()
+        mock_llm.generate_text.return_value = (
+            "SUBQUERY: How do attention heads coordinate? | ASPECT: Coordination"
+        )
+
+        aspects = [
+            QueryAspect("Coordination", "process", 1.0, ["coordinate", "heads"]),
+        ]
+
+        planner.generate_subqueries_for_aspects(
+            "Explain attention heads",
+            aspects,
+            llm_client=mock_llm,
+            max_subqueries=1,
+            past_subqueries=["How do attention heads work?"],
+            coverage_scores={"Coordination": 0.2},
+            retrieved_docs=[{"title": "Doc A"}],
+            uncovered_aspect_names=["Coordination"],
+        )
+
+        args, kwargs = mock_llm.generate_text.call_args
+        prompt = args[0]
+        assert "Given the uncovered aspects" in prompt
+        assert "past subqueries" in prompt.lower()
+        assert "Coverage snapshot" in prompt
 
 
 class TestSubqueryScoring:
@@ -356,6 +439,117 @@ class TestLoggingAndTracing:
         
         assert any("Scored" in record.message for record in caplog.records), \
             "Should log scoring results"
+
+
+class TestAspectCoverageEnhancements:
+    """Tests for embedding-based coverage improvements."""
+
+    def test_embedding_similarity_updates_scores(self):
+        class DummyEmbedder:
+            def encode(self, text, convert_to_numpy=True):
+                return np.ones(4)
+
+        planner = QueryPlanner(enable_aspect_coverage=True)
+        aspect = QueryAspect("Definition", "definition", 1.0, ["attention", "head"])
+        coverage = AspectCoverage(aspects=[aspect])
+        documents = [
+            {"title": "Attention heads overview", "content": "Attention head mechanism"}
+        ]
+
+        planner.update_aspect_coverage(
+            coverage,
+            documents,
+            current_hop=1,
+            embedder=DummyEmbedder(),
+        )
+
+        assert coverage.coverage_scores[aspect.aspect] >= planner.coverage_similarity_threshold
+        assert coverage.covered_by_hop[aspect.aspect] == 1
+
+    def test_should_continue_respects_coverage_goal(self):
+        planner = QueryPlanner(enable_aspect_coverage=True, coverage_goal=0.8)
+        aspect = QueryAspect("Definition", "definition", 1.0, ["attention"])
+        coverage = AspectCoverage(aspects=[aspect])
+        coverage.coverage_scores[aspect.aspect] = 0.85
+
+        should_continue, reason = planner.should_continue_retrieval(
+            retrieved_docs=[{"score": 0.7}],
+            current_hop=3,
+            aspect_coverage=coverage,
+            coverage_threshold=0.7,
+        )
+
+        assert not should_continue
+        assert "coverage goal" in reason.lower()
+
+
+class TestResearchAgentAdaptiveLoop:
+    """Additional integration tests for updated agent flow."""
+
+    def test_agent_passes_context_to_planner(self):
+        mock_retriever = Mock()
+        mock_retriever.retrieve.return_value = [
+            {"score": 0.8, "title": "Doc 1", "full_text": "Attention head details"}
+        ]
+        mock_retriever.model = Mock()
+        mock_retriever.model.encode.return_value = np.ones(4)
+
+        mock_llm = Mock()
+        mock_llm.is_available.return_value = True
+        mock_llm.generate_text.return_value = (
+            "SUBQUERY: What does an attention head focus on? | ASPECT: Focus"
+        )
+
+        agent = ResearchAgent(
+            mock_retriever,
+            llm_client=mock_llm,
+            adaptive_mode=True,
+            min_hops=1,
+            max_hops=3,
+        )
+
+        agent.answer_synthesizer.summarize_documents = Mock(return_value="Summary")
+        agent.answer_synthesizer.synthesize_answer = Mock(return_value="Answer")
+
+        result = agent.process("Explain attention heads")
+
+        assert result.metadata['mode'] == 'iterative_aspect_guided'
+        assert len(mock_llm.generate_text.mock_calls) >= 1
+        _, kwargs = mock_llm.generate_text.call_args
+        assert kwargs.get('max_tokens') == 500
+
+    def test_agent_updates_past_subqueries(self):
+        mock_retriever = Mock()
+        mock_retriever.retrieve.return_value = [
+            {"score": 0.8, "title": "Doc 1", "full_text": "Attention head details"}
+        ]
+        mock_retriever.model = Mock()
+        mock_retriever.model.encode.return_value = np.ones(4)
+
+        mock_llm = Mock()
+        mock_llm.is_available.return_value = True
+        mock_llm.generate_text.side_effect = [
+            (
+                "SUBQUERY: How do attention heads route information? | ASPECT: Routing\n"
+                "SUBQUERY: How do attention heads route token information? | ASPECT: Routing"
+            ),
+            "SUBQUERY: Why do attention heads exist? | ASPECT: Purpose",
+        ]
+
+        agent = ResearchAgent(
+            mock_retriever,
+            llm_client=mock_llm,
+            adaptive_mode=True,
+            min_hops=1,
+            max_hops=3,
+        )
+
+        agent.answer_synthesizer.summarize_documents = Mock(return_value="Summary")
+        agent.answer_synthesizer.synthesize_answer = Mock(return_value="Answer")
+
+        agent.process("Explain attention heads", per_sub_k=1)
+
+        assert mock_llm.generate_text.call_count >= 2
 
 
 class TestEdgeCases:

@@ -6,6 +6,7 @@ Main research agent that orchestrates the research process with adaptive subquer
 from typing import List, Dict, Any, Optional
 import time
 import logging
+import threading
 from ..shared.interfaces import IAgent, IRetriever, ILLMClient
 from ..shared.models import ResearchResult, SubqueryResult
 from ..shared.exceptions import AgentError
@@ -47,7 +48,11 @@ class ResearchAgent(IAgent):
         self.query_planner = QueryPlanner(min_hops=min_hops, max_hops=max_hops)
         self.answer_synthesizer = AnswerSynthesizer(llm_client)
         
-        print(f"Research agent initialized (LLM: {'enabled' if self.use_llm else 'disabled'}, Adaptive: {adaptive_mode})")
+        logger.debug(
+            "ResearchAgent initialized (llm_enabled=%s, adaptive_mode=%s)",
+            self.use_llm,
+            adaptive_mode,
+        )
     
     def process(self, question: str, per_sub_k: int = 3, iterative: bool = None) -> ResearchResult:
         """
@@ -68,8 +73,7 @@ class ResearchAgent(IAgent):
             iterative = self.adaptive_mode
         
         try:
-            print(f"\nResearching: {question}")
-            print(f"Mode: {'Adaptive Iterative' if iterative else 'Standard Batch'}")
+            logger.info("Starting research", extra={"question": question, "mode": "adaptive_iterative" if iterative else "standard_batch"})
             
             if iterative:
                 # Use new iterative adaptive approach
@@ -90,22 +94,36 @@ class ResearchAgent(IAgent):
         """
         # Analyze complexity first (for metadata)
         complexity = self.query_planner.analyze_complexity(question)
-        print(f"Complexity: {complexity.complexity_score:.2f} - {complexity.reasoning}")
-        print(f"Target subqueries: {complexity.estimated_hops}")
-        
-        # Generate subqueries using LLM (always required now)
-        if not self.use_llm or self.llm_client is None:
-            raise AgentError("LLM client is required for subquery generation. Please provide a valid LLM client.")
-        
-        subqueries = self.llm_client.generate_subqueries(question, target_count=complexity.estimated_hops)
-        print(f"Generated {len(subqueries)} subqueries")
+        logger.info(
+            "Batch mode complexity analysis",
+            extra={
+                "complexity_score": complexity.complexity_score,
+                "reasoning": complexity.reasoning,
+                "estimated_hops": complexity.estimated_hops,
+            },
+        )
+
+        subqueries: List[str]
+        if self.use_llm and self.llm_client is not None:
+            subqueries = self.llm_client.generate_subqueries(
+                question, target_count=complexity.estimated_hops
+            )
+        else:
+            logger.info(
+                "Batch mode using planner fallback subquery generation", extra={"target_count": complexity.estimated_hops}
+            )
+            subqueries = self.query_planner.generate_subqueries(
+                question, llm_client=None, adaptive=True
+            )
+
+        logger.info("Generated subqueries", extra={"subquery_count": len(subqueries)})
         
         # Process each subquery
         subquery_results = []
         all_citations = []
         
         for i, subquery in enumerate(subqueries, 1):
-            print(f"\nSubquery {i}/{len(subqueries)}: {subquery}")
+            logger.debug("Processing subquery", extra={"index": i, "total": len(subqueries), "subquery": subquery})
             
             # Retrieve documents for this subquery
             try:
@@ -127,9 +145,9 @@ class ResearchAgent(IAgent):
                         if doc not in all_citations:
                             all_citations.append(doc)
                     
-                    print(f"  Found {len(documents)} relevant documents")
+                    logger.debug("Subquery retrieval succeeded", extra={"documents": len(documents)})
                 else:
-                    print(f"  No relevant documents found")
+                    logger.debug("Subquery retrieval returned no documents")
                     subquery_result = SubqueryResult(
                         subquery=subquery,
                         summary="No relevant information found for this aspect.",
@@ -141,7 +159,7 @@ class ResearchAgent(IAgent):
                 subquery_results.append(subquery_result)
                 
             except Exception as e:
-                print(f"  Error processing subquery: {e}")
+                logger.exception("Error processing subquery", extra={"subquery": subquery})
                 subquery_result = SubqueryResult(
                     subquery=subquery,
                     summary="Error processing this aspect.",
@@ -175,6 +193,43 @@ class ResearchAgent(IAgent):
             }
         )
     
+    def process_streaming(self, question: str, per_sub_k: int = 3, stop_flag: threading.Event = None) -> ResearchResult:
+        """
+        Process a research question with streaming support for the final answer.
+        
+        Args:
+            question: Research question
+            per_sub_k: Number of documents to retrieve per subquery
+            stop_flag: Threading event to signal stop
+            
+        Returns:
+            ResearchResult with streaming generator for the final answer
+        """
+        start_time = time.time()
+        
+        try:
+            logger.info("Starting streaming research", extra={"question": question, "mode": "streaming"})
+            
+            # Use iterative processing (same as before)
+            result = self._process_iterative(question, per_sub_k, start_time)
+            
+            # Create streaming generator for the final answer
+            if stop_flag is None:
+                stop_flag = threading.Event()
+            
+            # Generate streaming answer
+            answer_generator = self.answer_synthesizer.synthesize_answer_streaming(
+                question, result.subqueries, stop_flag
+            )
+            
+            # Set streaming generator in result
+            result.set_streaming_generator(answer_generator, stop_flag)
+            
+            return result
+            
+        except Exception as e:
+            raise AgentError(f"Failed to process streaming research question: {str(e)}")
+    
     def _process_iterative(self, question: str, per_sub_k: int, start_time: float) -> ResearchResult:
         """
         New iterative processing: generate subqueries one at a time based on results.
@@ -182,27 +237,40 @@ class ResearchAgent(IAgent):
         """
         # Analyze complexity
         complexity = self.query_planner.analyze_complexity(question)
-        print(f"Complexity: {complexity.complexity_score:.2f} - {complexity.reasoning}")
-        print(f"Estimated hops needed: {complexity.estimated_hops}")
+        logger.info(
+            "Iterative mode complexity analysis",
+            extra={
+                "complexity_score": complexity.complexity_score,
+                "reasoning": complexity.reasoning,
+                "estimated_hops": complexity.estimated_hops,
+            },
+        )
         
         # Extract aspects for coverage tracking
         aspect_coverage = None
         if self.query_planner.enable_aspect_coverage:
             aspect_coverage = self.query_planner.extract_aspects(question, self.llm_client)
-            print(f"\n📋 Identified Aspects ({len(aspect_coverage.aspects)}):")
-            for i, aspect in enumerate(aspect_coverage.aspects, 1):
-                importance_label = "CORE" if aspect.importance >= 0.8 else "optional"
-                print(f"  {i}. [{importance_label}] {aspect.aspect} ({aspect.aspect_type})")
-            print()
+            logger.info(
+                "Identified aspects",
+                extra={
+                    "aspect_count": len(aspect_coverage.aspects),
+                    "aspects": [
+                        {
+                            "aspect": aspect.aspect,
+                            "type": aspect.aspect_type,
+                            "importance": aspect.importance,
+                        }
+                        for aspect in aspect_coverage.aspects
+                    ],
+                },
+            )
         
         subquery_results = []
         all_citations = []
         current_hop = 0
         max_hops = self.query_planner.max_hops
-        
-        # Check LLM availability
-        if not self.use_llm or self.llm_client is None:
-            raise AgentError("LLM client is required for subquery generation. Please provide a valid LLM client.")
+        past_subqueries: List[str] = []
+        coverage_history: Dict[str, float] = {}
         
         # Aspect-guided iterative loop
         while current_hop < max_hops:
@@ -214,31 +282,60 @@ class ResearchAgent(IAgent):
                 
                 if uncovered:
                     # Generate subqueries targeting uncovered aspects
-                    print(f"\n[Hop {current_hop}/{max_hops}] Targeting {len(uncovered)} uncovered aspects")
+                    logger.debug(
+                        "Targeting uncovered aspects",
+                        extra={
+                            "hop": current_hop,
+                            "max_hops": max_hops,
+                            "uncovered_count": len(uncovered),
+                        },
+                    )
                     
                     subquery_mappings = self.query_planner.generate_subqueries_for_aspects(
-                        question, uncovered, self.llm_client, max_subqueries=1
+                        question,
+                        uncovered,
+                        self.llm_client if self.use_llm else None,
+                        max_subqueries=1,
+                        past_subqueries=past_subqueries,
+                        coverage_scores=coverage_history,
+                        retrieved_docs=all_citations[-5:],
+                        uncovered_aspect_names=[aspect.aspect for aspect in uncovered],
                     )
                     
                     if not subquery_mappings:
-                        print("  No subqueries generated, stopping")
+                        logger.debug("No subqueries generated for uncovered aspects; stopping")
                         break
-                    
+
                     subquery, target_aspect = subquery_mappings[0]
-                    print(f"  🎯 Targeting Aspect: {target_aspect}")
-                    print(f"  Subquery: {subquery}")
+                    past_subqueries.append(subquery)
+                    logger.debug(
+                        "Generated aspect-focused subquery",
+                        extra={"target_aspect": target_aspect, "subquery": subquery},
+                    )
                 else:
                     # All aspects covered, optionally do one more exploratory query
-                    print(f"\n[Hop {current_hop}/{max_hops}] All aspects covered, stopping")
+                    logger.debug(
+                        "All aspects covered; stopping iterative retrieval",
+                        extra={"hop": current_hop, "max_hops": max_hops},
+                    )
                     break
             else:
                 # No aspect coverage tracking, generate generic subquery
-                candidate_subqueries = self.llm_client.generate_subqueries(question, target_count=1)
+                if self.use_llm and self.llm_client is not None:
+                    candidate_subqueries = self.llm_client.generate_subqueries(question, target_count=1)
+                else:
+                    candidate_subqueries = self.query_planner.generate_subqueries(
+                        question, llm_client=None, adaptive=True
+                    )
                 if not candidate_subqueries:
                     break
                 subquery = candidate_subqueries[0]
+                past_subqueries.append(subquery)
                 target_aspect = "General"
-                print(f"\n[Hop {current_hop}/{max_hops}] Subquery: {subquery}")
+                logger.debug(
+                    "Generated generic subquery",
+                    extra={"hop": current_hop, "max_hops": max_hops, "subquery": subquery},
+                )
             
             # Retrieve documents for this subquery
             try:
@@ -260,9 +357,15 @@ class ResearchAgent(IAgent):
                         if doc not in all_citations:
                             all_citations.append(doc)
                     
-                    print(f"  Found {len(documents)} relevant documents (total: {len(all_citations)})")
+                    logger.debug(
+                        "Subquery retrieval succeeded",
+                        extra={
+                            "documents": len(documents),
+                            "total_citations": len(all_citations),
+                        },
+                    )
                 else:
-                    print(f"  No relevant documents found")
+                    logger.debug("Subquery retrieval returned no documents")
                     subquery_result = SubqueryResult(
                         subquery=subquery,
                         summary="No relevant information found for this aspect.",
@@ -275,29 +378,47 @@ class ResearchAgent(IAgent):
                 
                 # Update aspect coverage if enabled
                 if aspect_coverage is not None:
-                    self.query_planner.update_aspect_coverage(aspect_coverage, all_citations, current_hop)
-                    
-                    # Show coverage progress
+                    self.query_planner.update_aspect_coverage(
+                        aspect_coverage,
+                        all_citations,
+                        current_hop,
+                        embedder=getattr(self.retriever, 'model', None),
+                    )
+
+                    coverage_history = dict(aspect_coverage.coverage_scores)
                     uncovered = aspect_coverage.get_uncovered_aspects()
                     coverage_pct = aspect_coverage.get_coverage_percentage()
-                    print(f"  📊 Coverage: {coverage_pct:.1%} ({len(uncovered)} aspects uncovered)")
-                    
-                    if uncovered:
-                        print(f"  Uncovered: {[a.aspect for a in uncovered[:2]]}")  # Show first 2
+                    logger.debug(
+                        "Aspect coverage progress",
+                        extra={
+                            "coverage": coverage_pct,
+                            "uncovered_count": len(uncovered),
+                            "sample_uncovered": [a.aspect for a in uncovered[:2]],
+                        },
+                    )
                 
                 # Check if we should continue
                 should_continue, reasoning = self.query_planner.should_continue_retrieval(
                     all_citations, current_hop, aspect_coverage=aspect_coverage
                 )
-                
-                print(f"  Decision: {'Continue' if should_continue else 'Stop'} - {reasoning}")
-                
+
+                logger.debug(
+                    "Continuation decision",
+                    extra={
+                        "should_continue": should_continue,
+                        "reasoning": reasoning,
+                        "current_hop": current_hop,
+                    },
+                )
+
                 if not should_continue:
-                    print(f"\n✓ Stopping early after {current_hop} hops: {reasoning}")
+                    logger.debug(
+                        "Stopping iterative retrieval early", extra={"hop": current_hop, "reason": reasoning}
+                    )
                     break
                 
             except Exception as e:
-                print(f"  Error processing subquery: {e}")
+                logger.exception("Error processing subquery", extra={"subquery": subquery})
                 subquery_result = SubqueryResult(
                     subquery=subquery,
                     summary="Error processing this aspect.",

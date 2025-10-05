@@ -1,8 +1,9 @@
 import ollama
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Generator
 import json
 import re
+import threading
 
 
 class OllamaClient:
@@ -85,6 +86,52 @@ class OllamaClient:
         except Exception as e:
             logging.error(f"Error generating text: {e}")
             return f"Error: Could not generate text - {e}"
+    
+    def generate_text_streaming(self, prompt: str, system_prompt: str = None, 
+                               max_tokens: int = 1000, stop_flag: threading.Event = None) -> Generator[str, None, None]:
+        """
+        Generate text using Ollama model with streaming support.
+        
+        Args:
+            prompt: User prompt
+            system_prompt: System prompt for context
+            max_tokens: Maximum tokens to generate
+            stop_flag: Threading event to signal stop
+            
+        Yields:
+            Text chunks as they are generated
+        """
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            stream = self.client.chat(
+                model=self.model_name,
+                messages=messages,
+                options={
+                    "num_predict": max_tokens,
+                    "temperature": 0.7,
+                    "top_p": 0.9
+                },
+                stream=True  # Enable streaming
+            )
+            
+            for chunk in stream:
+                # Check for stop signal
+                if stop_flag and stop_flag.is_set():
+                    logging.debug("Streaming stopped by stop_flag")
+                    break
+                
+                if 'message' in chunk and 'content' in chunk['message']:
+                    content = chunk['message']['content']
+                    if content:
+                        yield content
+                        
+        except Exception as e:
+            logging.error(f"Error in streaming generation: {e}")
+            yield f"Error: Could not generate text - {e}"
     
     def generate_subqueries(self, question: str, target_count: int = 5) -> List[str]:
         """

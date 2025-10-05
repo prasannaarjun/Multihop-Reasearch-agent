@@ -4,9 +4,10 @@ Shared data models for the multi-hop research agent system.
 
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Generator
 from enum import Enum
 import uuid
+import threading
 
 # SQLAlchemy imports for database models
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, func
@@ -133,10 +134,33 @@ class ResearchResult:
     total_documents: int
     processing_time: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
+    answer_streaming_generator: Optional[Generator[str, None, None]] = None
+    stop_flag: Optional[threading.Event] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return asdict(self)
+        data = asdict(self)
+        # Remove non-serializable fields
+        data.pop('answer_streaming_generator', None)
+        data.pop('stop_flag', None)
+        return data
+    
+    def to_dict_clean(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization, ensuring no streaming fields."""
+        return {
+            'question': self.question,
+            'answer': self.answer,
+            'subqueries': [sq.__dict__ for sq in self.subqueries],
+            'citations': self.citations,
+            'total_documents': self.total_documents,
+            'processing_time': self.processing_time,
+            'metadata': self.metadata
+        }
+    
+    def set_streaming_generator(self, generator: Generator[str, None, None], stop_flag: threading.Event = None):
+        """Set the streaming generator for the answer."""
+        self.answer_streaming_generator = generator
+        self.stop_flag = stop_flag
 
 
 @dataclass

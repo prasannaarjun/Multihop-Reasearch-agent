@@ -3,8 +3,9 @@ Chat Agent for Multi-hop Research
 Main chat agent that orchestrates chat functionality with research capabilities.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Generator
 from datetime import datetime, timezone
+import threading
 from ..shared.interfaces import IAgent
 from ..shared.models import ResearchResult, ChatResponse, ChatMessage, Conversation
 from ..shared.exceptions import AgentError, ConversationError
@@ -98,7 +99,7 @@ class ChatAgent(IAgent):
                     "assistant",
                     chat_response,
                     metadata={
-                        "research_result": research_result.to_dict(),
+                        "research_result": research_result.to_dict_clean(),
                         "subqueries": [sq.__dict__ for sq in research_result.subqueries],
                         "citations_count": len(research_result.citations),
                         "total_documents": research_result.total_documents
@@ -139,6 +140,106 @@ class ChatAgent(IAgent):
                 
         except Exception as e:
             raise AgentError(f"Failed to process chat message: {str(e)}")
+    
+    def process_streaming(self, message: str, conversation_id: Optional[str] = None, 
+                         per_sub_k: int = 3, include_context: bool = True,
+                         stop_flag: threading.Event = None) -> Generator[str, None, None]:
+        """
+        Process a chat message with streaming response.
+        
+        Args:
+            message: User's message
+            conversation_id: ID of the conversation (creates new if None)
+            per_sub_k: Number of documents per subquery
+            include_context: Whether to include conversation context
+            stop_flag: Threading event to signal stop
+            
+        Yields:
+            Response chunks as they are generated
+        """
+        try:
+            # Get or create conversation
+            if not conversation_id:
+                title = self._generate_conversation_title(message)
+                conversation_id = self.conversation_manager.create_conversation(title)
+            
+            conversation = self.conversation_manager.get_conversation(conversation_id)
+            if not conversation:
+                yield "Error: Conversation not found"
+                return
+            
+            # Add user message to conversation
+            user_message = self.conversation_manager.add_message(
+                conversation_id, 
+                "user", 
+                message,
+                metadata={"per_sub_k": per_sub_k}
+            )
+            
+            # Update conversation title if this is one of the first few messages
+            if len(conversation.messages) <= 3 and self._is_generic_title(conversation.title):
+                new_title = self._generate_conversation_title_from_conversation(conversation)
+                if new_title != conversation.title:
+                    self.conversation_manager.update_conversation_title(conversation_id, new_title)
+                    conversation.title = new_title
+            
+            # Build context for research
+            research_context = {}
+            if include_context:
+                research_context = self.context_builder.build_research_context(conversation)
+            
+            # Perform research with context
+            try:
+                # Enhance question with context if available
+                enhanced_question = self.context_builder.enhance_question_with_context(
+                    message, research_context
+                )
+                
+                # Get research results with streaming
+                research_result = self.research_agent.process_streaming(enhanced_question, per_sub_k=per_sub_k, stop_flag=stop_flag)
+                
+                # Collect streaming response for both display and storage
+                full_response = ""
+                streaming_stopped = False
+                
+                # Generate streaming chat response
+                for chunk in self.response_generator.generate_chat_response_streaming(
+                    research_result, research_context, stop_flag
+                ):
+                    if stop_flag and stop_flag.is_set():
+                        streaming_stopped = True
+                        break
+                    full_response += chunk
+                    yield chunk
+                
+                # Add assistant message to conversation (whether completed or stopped)
+                assistant_message = self.conversation_manager.add_message(
+                    conversation_id,
+                    "assistant",
+                    full_response,
+                    metadata={
+                        "research_result": research_result.to_dict_clean(),
+                        "subqueries": [sq.__dict__ for sq in research_result.subqueries],
+                        "citations_count": len(research_result.citations),
+                        "total_documents": research_result.total_documents,
+                        "streaming_stopped": streaming_stopped,
+                        "context_used": bool(research_context.get('recent_messages'))
+                    }
+                )
+                
+            except Exception as e:
+                # Add error message to conversation
+                error_message = f"I encountered an error while researching your question: {str(e)}"
+                self.conversation_manager.add_message(
+                    conversation_id,
+                    "assistant",
+                    error_message,
+                    metadata={"error": str(e), "error_type": type(e).__name__}
+                )
+                yield error_message
+                
+        except Exception as e:
+            yield f"Error: Failed to process chat message: {str(e)}"
     
     def chat_ask(self, question: str, conversation_id: Optional[str] = None, 
                  per_sub_k: int = 3, include_context: bool = True) -> Dict[str, Any]:
