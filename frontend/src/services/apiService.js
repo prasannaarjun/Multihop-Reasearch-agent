@@ -249,7 +249,7 @@ class ApiService {
   }
 
   // Streaming Chat API methods
-  async sendChatMessageStreaming(message, conversationId = null, perSubK = 3, includeContext = true, onChunk = null, onComplete = null, onError = null) {
+  async sendChatMessageStreaming(message, conversationId = null, perSubK = 3, includeContext = true, askModel = null, onChunk = null, onComplete = null, onError = null) {
     const apiBase = getApiBase();
     const requestBody = {
       message,
@@ -257,6 +257,11 @@ class ApiService {
       per_sub_k: perSubK,
       include_context: includeContext
     };
+
+    // Include selected_text if askModel is provided (for ask model functionality)
+    if (askModel) {
+      requestBody.selected_text = askModel;
+    }
 
     const config = {
       method: 'POST',

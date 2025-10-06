@@ -74,23 +74,37 @@ const AskModelModal = ({
     setError(null);
 
     try {
-      const response = await apiService.sendChatMessage(
+      // Use streaming API for ask model functionality
+      let streamingContent = '';
+      let finalMetadata = {};
+      
+      await apiService.sendChatMessageStreaming(
         question.trim(),
         conversationId,
         3,
         true,
-        highlight.trim()
+        highlight.trim(), // Pass the highlight as selected_text
+        (chunk, requestId) => {
+          streamingContent += chunk;
+        },
+        (requestId, metadata) => {
+          finalMetadata = metadata;
+        },
+        (error, requestId) => {
+          setError(error || 'Failed to ask the model.');
+          setIsLoading(false);
+        }
       );
       
       // Convert response to expected format
       const assistantMessage = {
-        id: response.message_id,
+        id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: response.answer,
-        timestamp: response.timestamp,
+        content: streamingContent,
+        timestamp: new Date().toISOString(),
         metadata: {
-          research_result: response.research_result,
-          context_used: response.context_used,
+          research_result: finalMetadata.research_result || {},
+          context_used: finalMetadata.context_used || false,
           source: 'ask_model',
           highlights: [highlight.trim()]
         }

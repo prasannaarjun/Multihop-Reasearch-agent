@@ -180,6 +180,7 @@ const ChatInterface = ({ onToggleMode, isResearchMode }) => {
         currentConversation?.conversation_id,
         3,
         true,
+        selectedText, // Pass the selected text for ask model functionality
         (chunk, requestId) => {
           setStreamingContent(prev => prev + chunk);
           setCurrentRequestId(requestId);
