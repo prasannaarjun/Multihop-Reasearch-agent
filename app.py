@@ -110,16 +110,9 @@ def load_available_models():
                 response.raise_for_status()
                 ollama_data = response.json()
             except requests.exceptions.RequestException as e:
-                logging.warning(f"Could not connect to Ollama at {ollama_base_url}: {e}")
-                # For testing purposes, add some mock models
-                logging.info("Adding mock models for testing...")
-                available_models = [
-                    {"name": "llama2:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
-                    {"name": "mistral:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""},
-                    {"name": "codellama:latest", "size": 0, "modified_at": "", "family": "", "format": "", "families": [], "parameter_size": "", "quantization_level": ""}
-                ]
-                current_model = available_models[0]['name'] if available_models else None
-                logging.info(f"Mock models set: {available_models}")
+                # Ollama not available - set empty models
+                available_models = []
+                current_model = None
                 return
             
             # Parse models from Ollama response
@@ -142,10 +135,8 @@ def load_available_models():
             # Set current model to first available model if none is set
             if not current_model and models:
                 current_model = models[0]['name']
-                logging.info(f"Auto-selected model: {current_model}")
             
         except Exception as e:
-            logging.error(f"Error loading models: {e}")
             available_models = []
             current_model = None
 
@@ -173,7 +164,6 @@ async def lifespan(app: FastAPI):
     try:
         # Create database tables
         create_tables()
-        logging.info("Database tables created successfully")
         
         # Load available models from Ollama
         load_available_models()
@@ -183,31 +173,22 @@ async def lifespan(app: FastAPI):
         
         # Initialize embedding model
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        logging.info("Embedding model loaded successfully")
         
         # Note: Document retriever and research agent are now created per-request
         # with user-scoped database sessions for multi-tenant support
         
-        logging.info("Research agent system initialized successfully")
-        if current_model:
-            logging.info(f"Using LLM model: {current_model}")
-        logging.info("Starting Multi-hop Research Agent API (Postgres Version)...")
     except Exception as e:
-        logging.error(f"Failed to initialize agents: {e}")
         research_agent = None
         embedding_model = None
     
     yield
     
     # Shutdown
-    logging.info("Shutting down Multi-hop Research Agent API...")
-    
     # Clear global variables
     available_models = []
     current_model = None
     research_agent = None
     embedding_model = None
-    logging.info("Global variables cleared.")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -1221,9 +1202,6 @@ async def get_follow_up_suggestions(
 
 if __name__ == "__main__":
     import uvicorn
-    
-    logging.info("Starting Multi-hop Research Agent API (Postgres Version)...")
-    logging.info("Make sure you have run the Alembic migration to create the embeddings table")
     
     uvicorn.run(
         "app:app",
