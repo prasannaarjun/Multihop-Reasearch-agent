@@ -42,22 +42,19 @@ const getApiBase = () => {
 
 class ApiService {
   constructor() {
-    this.token = localStorage.getItem('access_token');
-    this.refreshToken = localStorage.getItem('refresh_token');
+    // Access token is kept in-memory only; refresh token is stored as HttpOnly cookie by server
+    this.token = null;
+    this.refreshToken = null;
   }
 
   setTokens(accessToken, refreshToken) {
     this.token = accessToken;
-    this.refreshToken = refreshToken;
-    localStorage.setItem('access_token', accessToken);
-    localStorage.setItem('refresh_token', refreshToken);
+    this.refreshToken = null;
   }
 
   clearTokens() {
     this.token = null;
     this.refreshToken = null;
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
   }
 
   async request(endpoint, options = {}) {
@@ -71,6 +68,10 @@ class ApiService {
       },
       ...options,
     };
+    // Include cookies for credentialed requests
+    if (config.credentials === undefined) {
+      config.credentials = 'include';
+    }
 
     // Add authorization header if token exists
     if (this.token) {
@@ -81,7 +82,7 @@ class ApiService {
       const response = await fetch(url, config);
       
       // Handle token expiration
-      if (response.status === 401 && this.refreshToken) {
+      if (response.status === 401) {
         try {
           await this.refreshAccessToken();
           // Retry the original request with new token
@@ -141,14 +142,17 @@ class ApiService {
 
   async exportReport(question) {
     const apiBase = getApiBase();
-    const response = await fetch(`${apiBase}/export?question=${encodeURIComponent(question)}`);
+    const headers = {};
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+    }
+    const response = await fetch(`${apiBase}/export?question=${encodeURIComponent(question)}`, { headers, credentials: 'include' });
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.detail || 'Failed to export report');
     }
     
-    // Download the file
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -173,6 +177,7 @@ class ApiService {
       method: 'POST',
       body: formData,
       headers: {},
+      credentials: 'include',
     };
 
     if (this.token) {
@@ -181,7 +186,7 @@ class ApiService {
 
     const response = await fetch(`${apiBase}/upload`, config);
 
-    if (response.status === 401 && this.refreshToken) {
+    if (response.status === 401) {
       try {
         await this.refreshAccessToken();
         config.headers.Authorization = `Bearer ${this.token}`;
@@ -216,7 +221,7 @@ class ApiService {
   }
 
   // Chat API methods
-  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true, askModel = null) {
+  async sendChatMessage(message, conversationId = null, perSubK = 3, includeContext = true, selectedText = null) {
     const requestBody = {
       message,
       conversation_id: conversationId,
@@ -224,9 +229,9 @@ class ApiService {
       include_context: includeContext
     };
 
-    // Only include ask_model if it's provided
-    if (askModel) {
-      requestBody.ask_model = askModel;
+    // Include selected_text if provided
+    if (selectedText) {
+      requestBody.selected_text = selectedText;
     }
 
     const response = await this.request('/chat', {
@@ -249,7 +254,7 @@ class ApiService {
   }
 
   // Streaming Chat API methods
-  async sendChatMessageStreaming(message, conversationId = null, perSubK = 3, includeContext = true, askModel = null, onChunk = null, onComplete = null, onError = null) {
+  async sendChatMessageStreaming(message, conversationId = null, perSubK = 3, includeContext = true, selectedText = null, onChunk = null, onComplete = null, onError = null) {
     const apiBase = getApiBase();
     const requestBody = {
       message,
@@ -258,9 +263,9 @@ class ApiService {
       include_context: includeContext
     };
 
-    // Include selected_text if askModel is provided (for ask model functionality)
-    if (askModel) {
-      requestBody.selected_text = askModel;
+    // Include selected_text if provided (for ask model functionality)
+    if (selectedText) {
+      requestBody.selected_text = selectedText;
     }
 
     const config = {
@@ -269,6 +274,7 @@ class ApiService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
+      credentials: 'include',
     };
 
     // Add authorization header if token exists
@@ -338,6 +344,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
     };
 
     if (this.token) {
@@ -420,50 +427,62 @@ class ApiService {
     const response = await this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
+      credentials: 'include',
     });
     
-    // Store tokens
-    this.setTokens(response.access_token, response.refresh_token);
+    // Store access token; if refresh_token is included (dev fallback), keep it in-memory temporarily
+    this.setTokens(response.access_token, null);
+    if (response.refresh_token) {
+      this.refreshToken = response.refresh_token;
+    }
     return response;
   }
 
   async refreshAccessToken() {
-    if (!this.refreshToken) {
-      throw new Error('No refresh token available');
-    }
-
     const apiBase = getApiBase();
-    const response = await fetch(`${apiBase}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refresh_token: this.refreshToken }),
-    });
+    let response;
+    if (this.refreshToken) {
+      // Fallback path for dev when cookie is unavailable
+      response = await fetch(`${apiBase}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: this.refreshToken }),
+        credentials: 'include',
+      });
+    } else {
+      response = await fetch(`${apiBase}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // cookie carries refresh token
+        credentials: 'include',
+      });
+    }
 
     if (!response.ok) {
       throw new Error('Failed to refresh token');
     }
 
     const data = await response.json();
-    this.setTokens(data.access_token, data.refresh_token);
+    this.setTokens(data.access_token, null);
     return data;
   }
 
   async logout() {
-    if (this.refreshToken) {
-      try {
-        const apiBase = getApiBase();
-        await fetch(`${apiBase}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ refresh_token: this.refreshToken }),
-        });
-      } catch (error) {
-        console.warn('Logout request failed:', error);
-      }
+    try {
+      const apiBase = getApiBase();
+      await fetch(`${apiBase}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.warn('Logout request failed:', error);
     }
     this.clearTokens();
   }

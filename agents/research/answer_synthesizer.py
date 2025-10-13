@@ -226,26 +226,3 @@ Provide a focused summary that answers the question:"""
         return [sentence for _, sentence in scored_sentences[:2]]
 
 
-if __name__ == "__main__":
-    # Test the answer synthesizer
-    synthesizer = AnswerSynthesizer()
-    
-    # Test with sample data
-    subquery_results = [
-        {
-            'subquery': 'What is machine learning?',
-            'summary': 'Machine learning is a subset of artificial intelligence that enables computers to learn and improve from experience without being explicitly programmed.',
-            'documents': []
-        },
-        {
-            'subquery': 'How does machine learning work?',
-            'summary': 'Machine learning works by using algorithms to identify patterns in data and make predictions or decisions based on those patterns.',
-            'documents': []
-        }
-    ]
-    
-    question = "What is machine learning and how does it work?"
-    answer = synthesizer.synthesize_answer(question, subquery_results)
-    
-    print(f"Question: {question}")
-    print(f"Answer: {answer}")

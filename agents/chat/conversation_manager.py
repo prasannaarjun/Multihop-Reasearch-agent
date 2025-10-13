@@ -328,15 +328,3 @@ class ConversationManager(IConversationManager):
         return query.first()
 
 
-if __name__ == "__main__":
-    # Test the conversation manager
-    print("Testing Conversation Manager")
-    print("=" * 50)
-    
-    # Note: This test requires a database session and user authentication
-    # For actual testing, use the test files in the tests/ directory
-    print("Database-based ConversationManager requires:")
-    print("- Database session (SessionLocal)")
-    print("- Authenticated user (user_id)")
-    print("- Admin privileges (is_admin)")
-    print("\nUse tests/test_conversation_manager.py for proper testing")

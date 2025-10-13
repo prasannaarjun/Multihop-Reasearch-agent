@@ -117,3 +117,13 @@ class SessionInfo(BaseModel):
     is_active: bool
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class RefreshRequest(BaseModel):
+    """Request body for refresh token endpoint (fallback if cookie missing)."""
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    """Request body for logout endpoint (fallback if cookie missing)."""
+    refresh_token: str

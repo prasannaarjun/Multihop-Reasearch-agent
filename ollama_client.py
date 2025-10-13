@@ -1,9 +1,11 @@
+
 import ollama
 import logging
 from typing import List, Dict, Any, Optional, Generator
 import json
 import re
 import threading
+import logging
 
 
 class OllamaClient:
@@ -167,7 +169,7 @@ class OllamaClient:
         
         # If LLM fails or returns too few, create fallback
         if len(cleaned_subqueries) < max(1, target_count // 2):
-            logger.warning(f"LLM generated only {len(cleaned_subqueries)} subqueries, expected {target_count}. Using fallback.")
+            logging.warning(f"LLM generated only {len(cleaned_subqueries)} subqueries, expected {target_count}. Using fallback.")
             # Simple fallback
             key_terms = ' '.join([word for word in question.split() if len(word) > 3])[:50]
             fallback = [

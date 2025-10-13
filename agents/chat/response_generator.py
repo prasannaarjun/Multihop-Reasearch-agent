@@ -242,21 +242,4 @@ if __name__ == "__main__":
         processing_time=1.5
     )
     
-    # Test response generator
-    generator = ResponseGenerator()
     
-    # Test chat response
-    context = {"message_count": 3, "recent_context": "Previous discussion about AI"}
-    response = generator.generate_chat_response(research_result, context)
-    print("Chat Response:")
-    print(response)
-    
-    # Test follow-up suggestions
-    suggestions = generator.generate_follow_up_suggestions(research_result)
-    print(f"\nFollow-up suggestions: {suggestions}")
-    
-    # Test error response
-    error_response = generator.generate_error_response("Database connection failed", context)
-    print(f"\nError response: {error_response}")
-    
-    print("\nTest completed!")

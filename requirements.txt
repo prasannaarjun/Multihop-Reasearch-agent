@@ -9,8 +9,6 @@ sentence-transformers>=2.2.2
 numpy>=1.24.0
 
 # Document processing
-PyPDF2>=3.0.1
-pypdf>=3.17.0
 docling>=1.0.0
 
 # Database dependencies

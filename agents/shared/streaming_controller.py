@@ -18,6 +18,8 @@ class StreamingController:
         self.pause_flag = threading.Event()
         self.is_paused = False
         self.request_id: Optional[str] = None
+        # Owner of this request (user id); used for authorization on stop
+        self.owner_user_id: Optional[int] = None
     
     def stop(self):
         """Stop the streaming operation."""

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 
 const AuthContext = createContext();
@@ -16,12 +16,8 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  useEffect(() => {
-    // Check if user is already authenticated on app load
-    checkAuthStatus();
-  }, []);
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
     try {
       if (apiService.isAuthenticated()) {
         const userData = await apiService.getCurrentUser();
@@ -35,7 +31,22 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const hydrateAndCheckAuth = useCallback(async () => {
+    try {
+      // Attempt to hydrate access token from HttpOnly refresh cookie (silent)
+      await apiService.refreshAccessToken();
+    } catch (e) {
+      // Ignore if no valid cookie/session
+    }
+    await checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  useEffect(() => {
+    // Check if user is already authenticated on app load
+    hydrateAndCheckAuth();
+  }, [hydrateAndCheckAuth]);
 
   const login = async (credentials) => {
     try {

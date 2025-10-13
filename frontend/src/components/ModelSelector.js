@@ -23,9 +23,12 @@ const ModelSelector = ({ currentModel, onModelChange, disabled = false }) => {
       const response = await apiService.getAvailableModels();
       
       setModels(response.models || []);
+      
+      // Derive availability: if backend says available or a current_model is present, consider it available
+      const derivedAvailable = !!(response.ollama_available || response.current_model);
       setOllamaStatus({
-        enabled: response.ollama_enabled,
-        available: response.ollama_available
+        enabled: !!response.ollama_enabled,
+        available: derivedAvailable
       });
       
       // Update current model from API response - use callback to avoid stale closure

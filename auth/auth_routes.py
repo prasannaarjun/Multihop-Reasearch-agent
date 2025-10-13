@@ -3,14 +3,16 @@ Authentication API routes
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timezone
 from .database import get_db, User
 from .auth_service import AuthService
 from .auth_models import (
-    UserCreate, UserLogin, Token, UserResponse, 
-    PasswordChange, UserUpdate, SessionInfo
+    UserCreate, UserLogin, Token, UserResponse,
+    PasswordChange, UserUpdate, SessionInfo, RefreshRequest, LogoutRequest
 )
 from .auth_middleware import get_current_active_user, get_current_admin_user, TokenData
 
@@ -45,7 +47,7 @@ async def login_user(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Login user and return access token"""
+    """Login user and set refresh token cookie; return access token JSON"""
     auth_service = AuthService(db)
     
     try:
@@ -53,12 +55,41 @@ async def login_user(
         client_ip = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent")
         
-        token = auth_service.login_user(
+        token, refresh_token = auth_service.login_user(
             user_login, 
             ip_address=client_ip, 
             user_agent=user_agent
         )
-        return token
+        # Determine cookie security flags based on environment
+        origin = request.headers.get("origin", "") or ""
+        is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+        is_https = origin.startswith("https://")
+        # Cookie flags: HTTPS => SameSite=None + Secure; Localhost HTTP => SameSite=Lax without Secure
+        if is_https:
+            use_secure = True
+            samesite_mode = "None"
+        elif is_localhost:
+            use_secure = False
+            samesite_mode = "Lax"
+        else:
+            use_secure = False
+            samesite_mode = "Lax"
+        refresh_max_age = 60 * 60 * 24 * 7  # 7 days
+
+        # Include refresh_token in body as dev fallback when cookie is blocked
+        token_payload = token.model_dump()
+        token_payload["refresh_token"] = refresh_token
+        response = JSONResponse(content=jsonable_encoder(token_payload))
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=use_secure,
+            samesite=samesite_mode,
+            max_age=refresh_max_age,
+            path="/",
+        )
+        return response
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -72,51 +103,116 @@ async def login_user(
 
 @auth_router.post("/refresh", response_model=Token)
 async def refresh_token(
-    request: dict,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Refresh access token using refresh token"""
     auth_service = AuthService(db)
-    
-    refresh_token = request.get("refresh_token")
-    if not refresh_token:
+    # Prefer cookie; fallback to JSON body for backward compatibility
+    cookie_refresh = request.cookies.get("refresh_token")
+    body_refresh = None
+    # Try Pydantic model for clarity if body provided
+    try:
+        data = await request.json()
+        if isinstance(data, dict) and "refresh_token" in data:
+            body_refresh = RefreshRequest(**data).refresh_token
+    except Exception:
+        pass
+    provided_refresh = cookie_refresh or body_refresh
+    if not provided_refresh:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="refresh_token is required"
         )
-    
-    token = auth_service.refresh_access_token(refresh_token)
+
+    token = auth_service.refresh_access_token(provided_refresh)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
-    
-    return token
+
+    # Refresh cookie expiry
+    origin = request.headers.get("origin", "") or ""
+    is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+    is_https = origin.startswith("https://")
+    if is_https:
+        use_secure = True
+        samesite_mode = "None"
+    elif is_localhost:
+        use_secure = False
+        samesite_mode = "Lax"
+    else:
+        use_secure = False
+        samesite_mode = "Lax"
+    refresh_max_age = 60 * 60 * 24 * 7
+
+    response = JSONResponse(content=jsonable_encoder(token.model_dump()))
+    if cookie_refresh:
+        response.set_cookie(
+            key="refresh_token",
+            value=cookie_refresh,
+            httponly=True,
+            secure=use_secure,
+            samesite=samesite_mode,
+            max_age=refresh_max_age,
+            path="/",
+        )
+    return response
 
 @auth_router.post("/logout")
 async def logout_user(
-    request: dict,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Logout user by invalidating refresh token"""
     auth_service = AuthService(db)
     
-    refresh_token = request.get("refresh_token")
-    if not refresh_token:
+    # Prefer cookie; fallback to JSON body
+    cookie_refresh = request.cookies.get("refresh_token")
+    body_refresh = None
+    try:
+        data = await request.json()
+        if isinstance(data, dict) and "refresh_token" in data:
+            body_refresh = LogoutRequest(**data).refresh_token
+    except Exception:
+        pass
+    provided_refresh = cookie_refresh or body_refresh
+    if not provided_refresh:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="refresh_token is required"
         )
-    
-    success = auth_service.logout_user(refresh_token)
+
+    success = auth_service.logout_user(provided_refresh)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid refresh token"
         )
-    
-    return {"message": "Successfully logged out"}
+
+    # Clear cookie
+    origin = request.headers.get("origin", "") or ""
+    is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+    is_https = origin.startswith("https://")
+    if is_https:
+        use_secure = True
+        samesite_mode = "None"
+    elif is_localhost:
+        use_secure = False
+        samesite_mode = "Lax"
+    else:
+        use_secure = False
+        samesite_mode = "Lax"
+
+    response = JSONResponse(content={"message": "Successfully logged out"})
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        secure=use_secure,
+        samesite=samesite_mode,
+    )
+    return response
 
 @auth_router.post("/logout-all")
 async def logout_all_sessions(

@@ -4,6 +4,7 @@ Authentication service with JWT handling and user management
 
 import os
 import logging
+import hashlib
 import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
@@ -163,8 +164,8 @@ class AuthService:
             return None
         return user
     
-    def login_user(self, user_login: UserLogin, ip_address: str = None, user_agent: str = None) -> Token:
-        """Login a user and return tokens"""
+    def login_user(self, user_login: UserLogin, ip_address: str = None, user_agent: str = None):
+        """Login a user and return (Token, refresh_token) for cookie setting"""
         user = self.authenticate_user(user_login.email, user_login.password)
         if not user:
             raise ValueError("Invalid email or password")
@@ -190,9 +191,11 @@ class AuthService:
         )
         
         # Create session record
+        # Store only a hash of the refresh token to avoid long token storage and improve security
+        refresh_token_hash = hashlib.sha256(refresh_token.encode('utf-8')).hexdigest()
         session = UserSession(
             user_id=user.id,
-            session_token=refresh_token,
+            session_token=refresh_token_hash,
             expires_at=datetime.now(timezone.utc) + refresh_token_expires,
             ip_address=ip_address,
             user_agent=user_agent
@@ -200,12 +203,15 @@ class AuthService:
         self.db.add(session)
         self.db.commit()
         
-        return Token(
+        token_obj = Token(
             access_token=access_token,
             token_type="bearer",
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             user=UserResponse.model_validate(user)
         )
+
+        # Return both the token object (response body) and the refresh token (for HttpOnly cookie)
+        return token_obj, refresh_token
     
     def refresh_access_token(self, refresh_token: str) -> Optional[Token]:
         """Refresh access token using refresh token"""
@@ -215,9 +221,11 @@ class AuthService:
             return None
         
         # Check if session exists and is active
+        # Match session by hash of provided refresh token
+        refresh_token_hash = hashlib.sha256(refresh_token.encode('utf-8')).hexdigest()
         session = self.db.query(UserSession).filter(
             and_(
-                UserSession.session_token == refresh_token,
+                UserSession.session_token == refresh_token_hash,
                 UserSession.is_active == True,
                 UserSession.expires_at > datetime.now(timezone.utc)
             )
@@ -246,8 +254,9 @@ class AuthService:
     
     def logout_user(self, refresh_token: str) -> bool:
         """Logout user by deactivating session"""
+        refresh_token_hash = hashlib.sha256(refresh_token.encode('utf-8')).hexdigest()
         session = self.db.query(UserSession).filter(
-            UserSession.session_token == refresh_token
+            UserSession.session_token == refresh_token_hash
         ).first()
         
         if session:
