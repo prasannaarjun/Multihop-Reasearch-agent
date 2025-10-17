@@ -5,6 +5,10 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import HTTPException, FastAPI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Suppress bcrypt version warning similar to original
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
