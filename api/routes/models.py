@@ -46,7 +46,7 @@ async def get_available_models(current_user: TokenData = Depends(get_current_act
 
 @router.post("/models/change")
 async def change_model(
-    request: ModelChangeRequest, current_user: TokenData = Depends(get_current_admin_user)
+    request: ModelChangeRequest, current_user: TokenData = Depends(get_current_active_user)
 ):
     try:
         use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
