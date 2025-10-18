@@ -120,18 +120,15 @@ def load_available_models():
 
 
 def set_current_model(model_name: str) -> bool:
-    """Set the current model if it exists in available models."""
+    """Set the current model."""
     global current_model
 
     with _model_lock:
-        if not available_models:
-            return False
-
-        model_exists = any(model["name"] == model_name for model in available_models)
-        if model_exists:
-            current_model = model_name
-            return True
-        return False
+        print(f"DEBUG: set_current_model called with '{model_name}'")
+        old_model = current_model
+        current_model = model_name
+        print(f"DEBUG: Model changed from '{old_model}' to '{current_model}'")
+        return True
 
 
 @asynccontextmanager
@@ -151,7 +148,8 @@ async def lifespan(app: FastAPI):
         # Initialize embedding model
         embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    except Exception:
+    except Exception as e:
+        print(f"Error during startup: {e}")
         research_agent = None
         embedding_model = None
 
